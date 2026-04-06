@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { generateScript, type TaskInput } from "../src/script-gen.js";
+import { describe, it, expect, afterEach } from "vitest";
+import { generateScript, generatePromptFiles, type TaskInput } from "../src/script-gen.js";
+import { readFile, rm, mkdtemp } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("generateScript", () => {
   const baseInput: TaskInput = {
@@ -98,5 +101,84 @@ describe("generateScript", () => {
     );
     // Should contain the completion message
     expect(script).toContain("All 1 steps complete");
+  });
+});
+
+describe("generatePromptFiles", () => {
+  let tempDir: string;
+
+  afterEach(async () => {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates shared-prompt.md with correct content", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "stepflow-gen-test-"));
+    const result = await generatePromptFiles(
+      {
+        name: "My Task",
+        description: "Build something cool",
+        cliTool: "claude",
+        steps: [{ name: "Setup", description: "Set things up" }],
+      },
+      tempDir
+    );
+
+    expect(result.sharedPromptPath).toBe(join(tempDir, ".stepflow", "shared-prompt.md"));
+    const shared = await readFile(result.sharedPromptPath, "utf-8");
+    expect(shared).toContain("# Task: My Task");
+    expect(shared).toContain("Build something cool");
+    expect(shared).toContain("## Shared Instructions");
+    expect(shared).toContain(`Work in the directory: ${tempDir}`);
+    expect(shared).toContain("result.md");
+  });
+
+  it("creates step directories and prompt files", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "stepflow-gen-test-"));
+    const result = await generatePromptFiles(
+      {
+        name: "Multi",
+        description: "Multi-step task",
+        cliTool: "codex",
+        steps: [
+          { name: "First Step", description: "Do first" },
+          { name: "Second Step", description: "Do second" },
+        ],
+      },
+      tempDir
+    );
+
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps[0].dirName).toBe("step-01-first-step");
+    expect(result.steps[1].dirName).toBe("step-02-second-step");
+
+    const prompt1 = await readFile(result.steps[0].promptPath, "utf-8");
+    expect(prompt1).toContain("## Step 1 of 2: First Step");
+    expect(prompt1).toContain("Do first");
+    // Should NOT contain shared prompt content
+    expect(prompt1).not.toContain("# Task:");
+
+    const prompt2 = await readFile(result.steps[1].promptPath, "utf-8");
+    expect(prompt2).toContain("## Step 2 of 2: Second Step");
+    expect(prompt2).toContain("Do second");
+  });
+
+  it("returns correct metadata for each step", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "stepflow-gen-test-"));
+    const result = await generatePromptFiles(
+      {
+        name: "T",
+        description: "d",
+        cliTool: "claude",
+        steps: [{ name: "Only", description: "The only step" }],
+      },
+      tempDir
+    );
+
+    expect(result.steps[0].index).toBe(0);
+    expect(result.steps[0].name).toBe("Only");
+    expect(result.steps[0].dirName).toBe("step-01-only");
+    expect(result.steps[0].promptPath).toContain("step-01-only/prompt.md");
   });
 });

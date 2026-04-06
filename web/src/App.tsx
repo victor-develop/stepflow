@@ -3,6 +3,7 @@ import { GitBranch } from "lucide-react";
 import TaskInput from "./components/TaskInput";
 import StepBreadcrumbs from "./components/StepBreadcrumbs";
 import AgentOutput from "./components/AgentOutput";
+import PromptEditor from "./components/PromptEditor";
 import GitPanel from "./components/GitPanel";
 import ControlBar from "./components/ControlBar";
 
@@ -11,8 +12,15 @@ interface Step {
   description: string;
 }
 
+interface StepPrompt {
+  index: number;
+  name: string;
+  dirName: string;
+  prompt: string;
+}
+
 interface AppState {
-  mode: "input" | "running" | "completed" | "error";
+  mode: "input" | "review" | "running" | "completed" | "error";
   taskName: string;
   taskDescription: string;
   cliTool: "codex" | "claude" | "opencode";
@@ -22,6 +30,8 @@ interface AppState {
   gitStatus: string;
   gitBranch: string;
   gitBranches: string[];
+  sharedPrompt: string;
+  stepPrompts: StepPrompt[];
 }
 
 const initialState: AppState = {
@@ -35,12 +45,16 @@ const initialState: AppState = {
   gitStatus: "",
   gitBranch: "main",
   gitBranches: ["main"],
+  sharedPrompt: "",
+  stepPrompts: [],
 };
 
 export default function App() {
   const [state, setState] = useState<AppState>(initialState);
   const [gitPanelOpen, setGitPanelOpen] = useState(false);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   // Fetch git info on mount
   useEffect(() => {
@@ -125,6 +139,98 @@ export default function App() {
 
     return () => es.close();
   }, [state.mode]);
+
+  const handleGenerate = useCallback(
+    async (config: {
+      taskName: string;
+      taskDescription: string;
+      cliTool: "codex" | "claude" | "opencode";
+      steps: Step[];
+    }) => {
+      setState((s) => ({
+        ...s,
+        ...config,
+      }));
+
+      try {
+        // Generate prompt files on disk
+        await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(config),
+        });
+
+        // Load the generated prompts
+        const res = await fetch("/api/prompts");
+        const data = await res.json();
+
+        setState((s) => ({
+          ...s,
+          mode: "review",
+          sharedPrompt: data.sharedPrompt ?? "",
+          stepPrompts: data.stepPrompts ?? [],
+        }));
+      } catch {
+        setState((s) => ({ ...s, mode: "error" }));
+      }
+    },
+    [],
+  );
+
+  const handleSavePrompts = useCallback(async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await fetch("/api/prompts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sharedPrompt: state.sharedPrompt,
+          stepPrompts: state.stepPrompts,
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      // best effort
+    } finally {
+      setSaving(false);
+    }
+  }, [state.sharedPrompt, state.stepPrompts]);
+
+  const handleExecute = useCallback(async () => {
+    // Save prompts first
+    try {
+      await fetch("/api/prompts", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sharedPrompt: state.sharedPrompt,
+          stepPrompts: state.stepPrompts,
+        }),
+      });
+    } catch {
+      // best effort
+    }
+
+    setState((s) => ({
+      ...s,
+      mode: "running",
+      currentStep: 0,
+      events: s.steps.map(() => []),
+    }));
+    setCompletedSteps([]);
+
+    try {
+      await fetch("/api/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ startFrom: 0 }),
+      });
+    } catch {
+      setState((s) => ({ ...s, mode: "error" }));
+    }
+  }, [state.sharedPrompt, state.stepPrompts]);
 
   const handleStart = useCallback(
     async (config: {
@@ -231,7 +337,28 @@ export default function App() {
       {/* Main content */}
       <main className="relative flex flex-1 overflow-hidden">
         <div className="flex-1 overflow-y-auto p-4">
-          {state.mode === "input" && <TaskInput onSubmit={handleStart} />}
+          {state.mode === "input" && <TaskInput onGenerate={handleGenerate} />}
+
+          {state.mode === "review" && (
+            <PromptEditor
+              sharedPrompt={state.sharedPrompt}
+              stepPrompts={state.stepPrompts}
+              onSharedPromptChange={(value) =>
+                setState((s) => ({ ...s, sharedPrompt: value }))
+              }
+              onStepPromptChange={(index, value) =>
+                setState((s) => ({
+                  ...s,
+                  stepPrompts: s.stepPrompts.map((sp) =>
+                    sp.index === index ? { ...sp, prompt: value } : sp,
+                  ),
+                }))
+              }
+              onSave={handleSavePrompts}
+              saving={saving}
+              saved={saved}
+            />
+          )}
 
           {(state.mode === "running" ||
             state.mode === "completed" ||
@@ -261,6 +388,7 @@ export default function App() {
           mode={state.mode}
           currentStep={state.currentStep}
           totalSteps={state.steps.length}
+          onExecute={handleExecute}
           onStart={() =>
             handleStart({
               taskName: state.taskName,

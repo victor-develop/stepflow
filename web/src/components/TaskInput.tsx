@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, X, Play } from "lucide-react";
+import { Plus, X, Wand2 } from "lucide-react";
 
 interface Step {
   name: string;
@@ -14,10 +14,10 @@ interface TaskConfig {
 }
 
 interface Props {
-  onSubmit: (config: TaskConfig) => void;
+  onGenerate: (config: TaskConfig) => void;
 }
 
-export default function TaskInput({ onSubmit }: Props) {
+export default function TaskInput({ onGenerate }: Props) {
   const [taskName, setTaskName] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
   const [cliTool, setCliTool] = useState<"codex" | "claude" | "opencode">(
@@ -49,7 +49,7 @@ export default function TaskInput({ onSubmit }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!taskName.trim() || steps.some((s) => !s.name.trim())) return;
-    onSubmit({ taskName, taskDescription, cliTool, steps });
+    onGenerate({ taskName, taskDescription, cliTool, steps });
   };
 
   return (
@@ -167,8 +167,8 @@ export default function TaskInput({ onSubmit }: Props) {
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
         disabled={!taskName.trim() || steps.some((s) => !s.name.trim())}
       >
-        <Play size={16} />
-        Generate &amp; Start
+        <Wand2 size={16} />
+        Generate
       </button>
     </form>
   );

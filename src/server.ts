@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from "express";
 import { createServer as createHttpServer, type Server } from "node:http";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
@@ -8,10 +9,12 @@ import {
   createExecution,
   executeAll,
   stopExecution,
+  stepDirName,
   type ExecutionState,
   type SseEmitter,
 } from "./executor.js";
-import { generateScript, type TaskInput } from "./script-gen.js";
+import { generateScript, generatePromptFiles, type TaskInput } from "./script-gen.js";
+import type { CliSource } from "./normalizer.js";
 import {
   gitStatus,
   gitBranches,
@@ -70,32 +73,95 @@ export function createServer(
   // ── Singleton execution state ──
   let currentExecution: ExecutionState | null = null;
 
+  // ── Generated task state (persists between generate and execute) ──
+  let generatedTask: {
+    taskName: string;
+    cliTool: CliSource;
+    steps: Array<{ name: string; description: string; dirName: string }>;
+  } | null = null;
+
   const sseEmitter: SseEmitter = (event) => broadcastSse(event);
 
-  // ── API: Generate script ──
-  app.post("/api/generate", (req: Request, res: Response) => {
+  // ── API: Generate prompt files ──
+  app.post("/api/generate", async (req: Request, res: Response) => {
     try {
       const { name, description, cliTool, steps } = req.body as TaskInput;
       if (!name || !steps?.length) {
         res.status(400).json({ error: "name and steps are required" });
         return;
       }
-      const script = generateScript(
+      const result = await generatePromptFiles(
         { name, description, cliTool, steps },
         cwd
       );
-      res.json({ script, steps });
+
+      // Store for later use by /api/execute
+      generatedTask = {
+        taskName: name,
+        cliTool: cliTool ?? "claude",
+        steps: result.steps.map((s) => ({
+          name: s.name,
+          description: steps[s.index].description,
+          dirName: s.dirName,
+        })),
+      };
+
+      res.json({ sharedPromptPath: result.sharedPromptPath, steps: result.steps });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // ── API: Start execution ──
+  // ── API: Read all prompt files ──
+  app.get("/api/prompts", async (_req: Request, res: Response) => {
+    try {
+      if (!generatedTask) {
+        res.status(400).json({ error: "No generated task. Call /api/generate first." });
+        return;
+      }
+      const sfDir = join(cwd, ".stepflow");
+      const sharedPrompt = await readFile(join(sfDir, "shared-prompt.md"), "utf-8");
+      const stepsData = await Promise.all(
+        generatedTask.steps.map(async (s, i) => {
+          const prompt = await readFile(join(sfDir, s.dirName, "prompt.md"), "utf-8");
+          return { index: i, name: s.name, dirName: s.dirName, prompt };
+        })
+      );
+      res.json({ sharedPrompt, steps: stepsData });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── API: Save edited prompts ──
+  app.put("/api/prompts", async (req: Request, res: Response) => {
+    try {
+      const { sharedPrompt, steps } = req.body as {
+        sharedPrompt: string;
+        steps: Array<{ dirName: string; prompt: string }>;
+      };
+      const sfDir = join(cwd, ".stepflow");
+      if (sharedPrompt !== undefined) {
+        await writeFile(join(sfDir, "shared-prompt.md"), sharedPrompt, "utf-8");
+      }
+      if (steps) {
+        for (const s of steps) {
+          await writeFile(join(sfDir, s.dirName, "prompt.md"), s.prompt, "utf-8");
+        }
+      }
+      res.json({ ok: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── API: Start execution (reads from disk) ──
   app.post("/api/execute", (req: Request, res: Response) => {
     try {
-      const { name, description, cliTool, steps, startFrom } = req.body;
-      if (!name || !steps?.length) {
-        res.status(400).json({ error: "name and steps are required" });
+      const { startFrom } = req.body ?? {};
+
+      if (!generatedTask) {
+        res.status(400).json({ error: "No generated task. Call /api/generate first." });
         return;
       }
 
@@ -104,18 +170,22 @@ export function createServer(
         return;
       }
 
-      currentExecution = createExecution(name, steps, cwd);
+      currentExecution = createExecution(
+        generatedTask.taskName,
+        generatedTask.steps,
+        cwd
+      );
 
       // Start execution async — don't await
       executeAll(
         currentExecution,
-        cliTool ?? "claude",
+        generatedTask.cliTool,
         sseEmitter,
         cwd,
         startFrom ?? 0
       );
 
-      res.json({ executionId: name, status: "running" });
+      res.json({ executionId: generatedTask.taskName, status: "running" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -143,11 +213,13 @@ export function createServer(
       return;
     }
 
+    const cliTool = generatedTask?.cliTool ?? "claude";
+
     currentExecution.status = "running" as const;
 
     executeAll(
       currentExecution,
-      "claude", // default tool for resume
+      cliTool,
       sseEmitter,
       cwd,
       startFrom ?? currentExecution.currentStep

@@ -1,9 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
   createExecution,
   getCliInvocation,
   stopExecution,
+  stepDirName,
+  buildPromptFromFiles,
 } from "../src/executor.js";
+import { mkdir, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 
 describe("createExecution", () => {
   it("creates execution state with correct defaults", () => {
@@ -83,5 +89,94 @@ describe("stopExecution", () => {
     state.childProcess = null;
     expect(() => stopExecution(state)).not.toThrow();
     expect(state.status).toBe("paused");
+  });
+});
+
+describe("stepDirName", () => {
+  it("formats index and slugifies name", () => {
+    expect(stepDirName(0, "Setup DB")).toBe("step-01-setup-db");
+    expect(stepDirName(9, "Final Step")).toBe("step-10-final-step");
+    expect(stepDirName(0, "Hello World!")).toBe("step-01-hello-world");
+  });
+
+  it("pads single-digit indices", () => {
+    expect(stepDirName(0, "a")).toBe("step-01-a");
+    expect(stepDirName(8, "b")).toBe("step-09-b");
+  });
+});
+
+describe("buildPromptFromFiles", () => {
+  let tempDir: string;
+
+  afterEach(async () => {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("combines shared prompt and step prompt", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "stepflow-exec-test-"));
+    const sfDir = join(tempDir, ".stepflow");
+    const stepDir = join(sfDir, "step-01-init");
+    await mkdir(stepDir, { recursive: true });
+
+    await writeFile(join(sfDir, "shared-prompt.md"), "# Shared prompt content", "utf-8");
+    await writeFile(join(stepDir, "prompt.md"), "## Step 1 of 1: Init\n\nDo init", "utf-8");
+
+    const steps = [{ index: 0, name: "Init", description: "Do init", cwd: tempDir }];
+    const prompt = await buildPromptFromFiles(tempDir, steps, 0);
+
+    expect(prompt).toContain("# Shared prompt content");
+    expect(prompt).toContain("## Step 1 of 1: Init");
+    expect(prompt).toContain("Do init");
+    expect(prompt).not.toContain("Previous Step Result");
+  });
+
+  it("includes previous step result when available", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "stepflow-exec-test-"));
+    const sfDir = join(tempDir, ".stepflow");
+    const step1Dir = join(sfDir, "step-01-first");
+    const step2Dir = join(sfDir, "step-02-second");
+    await mkdir(step1Dir, { recursive: true });
+    await mkdir(step2Dir, { recursive: true });
+
+    await writeFile(join(sfDir, "shared-prompt.md"), "# Shared", "utf-8");
+    await writeFile(join(step1Dir, "prompt.md"), "## Step 1", "utf-8");
+    await writeFile(join(step1Dir, "result.md"), "Step 1 completed successfully", "utf-8");
+    await writeFile(join(step2Dir, "prompt.md"), "## Step 2", "utf-8");
+
+    const steps = [
+      { index: 0, name: "First", description: "First step", cwd: tempDir },
+      { index: 1, name: "Second", description: "Second step", cwd: tempDir },
+    ];
+    const prompt = await buildPromptFromFiles(tempDir, steps, 1);
+
+    expect(prompt).toContain("# Shared");
+    expect(prompt).toContain("## Step 2");
+    expect(prompt).toContain("## Previous Step Result");
+    expect(prompt).toContain("Step 1 completed successfully");
+  });
+
+  it("omits previous result section when result.md missing", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "stepflow-exec-test-"));
+    const sfDir = join(tempDir, ".stepflow");
+    const step1Dir = join(sfDir, "step-01-first");
+    const step2Dir = join(sfDir, "step-02-second");
+    await mkdir(step1Dir, { recursive: true });
+    await mkdir(step2Dir, { recursive: true });
+
+    await writeFile(join(sfDir, "shared-prompt.md"), "# Shared", "utf-8");
+    await writeFile(join(step1Dir, "prompt.md"), "## Step 1", "utf-8");
+    await writeFile(join(step2Dir, "prompt.md"), "## Step 2", "utf-8");
+
+    const steps = [
+      { index: 0, name: "First", description: "First step", cwd: tempDir },
+      { index: 1, name: "Second", description: "Second step", cwd: tempDir },
+    ];
+    const prompt = await buildPromptFromFiles(tempDir, steps, 1);
+
+    expect(prompt).toContain("# Shared");
+    expect(prompt).toContain("## Step 2");
+    expect(prompt).not.toContain("Previous Step Result");
   });
 });

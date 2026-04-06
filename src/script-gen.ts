@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { CliSource } from "./normalizer.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -7,6 +9,16 @@ export interface TaskInput {
   description: string;
   cliTool: CliSource;
   steps: Array<{ name: string; description: string }>;
+}
+
+export interface GeneratedPrompts {
+  sharedPromptPath: string;
+  steps: Array<{
+    index: number;
+    name: string;
+    dirName: string;
+    promptPath: string;
+  }>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -101,4 +113,57 @@ export function generateScript(input: TaskInput, baseCwd: string): string {
 
 function escapeForDoubleQuote(s: string): string {
   return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`");
+}
+
+// ── Prompt File Generator ─────────────────────────────────────────
+
+export async function generatePromptFiles(
+  input: TaskInput,
+  baseCwd: string
+): Promise<GeneratedPrompts> {
+  const sfDir = join(baseCwd, ".stepflow");
+  await mkdir(sfDir, { recursive: true });
+
+  // Write shared prompt
+  const sharedPromptPath = join(sfDir, "shared-prompt.md");
+  const sharedContent = [
+    `# Task: ${input.name}`,
+    "",
+    input.description,
+    "",
+    "## Shared Instructions",
+    "",
+    `Work in the directory: ${baseCwd}`,
+    "When you are done with your step, produce a comprehensive result.md file in your step directory.",
+    "The result.md should summarize what you did, key decisions, file changes, and any issues encountered (up to 500 lines).",
+  ].join("\n");
+  await writeFile(sharedPromptPath, sharedContent, "utf-8");
+
+  // Write per-step prompts
+  const totalSteps = input.steps.length;
+  const stepsResult: GeneratedPrompts["steps"] = [];
+
+  for (let i = 0; i < totalSteps; i++) {
+    const step = input.steps[i];
+    const dirName = stepDirName(i, step.name);
+    const stepDir = join(sfDir, dirName);
+    await mkdir(stepDir, { recursive: true });
+
+    const promptPath = join(stepDir, "prompt.md");
+    const promptContent = [
+      `## Step ${i + 1} of ${totalSteps}: ${step.name}`,
+      "",
+      step.description,
+    ].join("\n");
+    await writeFile(promptPath, promptContent, "utf-8");
+
+    stepsResult.push({
+      index: i,
+      name: step.name,
+      dirName,
+      promptPath,
+    });
+  }
+
+  return { sharedPromptPath, steps: stepsResult };
 }

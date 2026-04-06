@@ -2,9 +2,10 @@ import { useState } from "react";
 import { Play, Square, SkipForward, ChevronDown } from "lucide-react";
 
 interface Props {
-  mode: "input" | "running" | "completed" | "error";
+  mode: "input" | "review" | "running" | "completed" | "error";
   currentStep: number;
   totalSteps: number;
+  onExecute: () => void;
   onStart: () => void;
   onStop: () => void;
   onResume: (fromStep: number) => void;
@@ -14,6 +15,7 @@ export default function ControlBar({
   mode,
   currentStep,
   totalSteps,
+  onExecute,
   onStart,
   onStop,
   onResume,
@@ -24,6 +26,9 @@ export default function ControlBar({
     <div className="flex items-center justify-between border-t border-zinc-800 bg-zinc-900/80 px-4 py-3">
       {/* Step progress */}
       <div className="text-sm text-zinc-400">
+        {mode === "review" && (
+          <span>{totalSteps} steps ready</span>
+        )}
         {mode === "running" && (
           <span>
             Step {currentStep + 1}/{totalSteps}
@@ -41,7 +46,18 @@ export default function ControlBar({
 
       {/* Controls */}
       <div className="flex items-center gap-2">
-        {/* Start — visible in completed mode */}
+        {/* Start Execution — visible in review mode */}
+        {mode === "review" && (
+          <button
+            onClick={onExecute}
+            className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700"
+          >
+            <Play size={14} />
+            Start Execution
+          </button>
+        )}
+
+        {/* Re-run — visible in completed/error mode */}
         {(mode === "completed" || mode === "error") && (
           <button
             onClick={onStart}

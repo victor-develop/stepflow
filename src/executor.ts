@@ -64,7 +64,7 @@ export function getCliInvocation(
 
 // ── Step Directory Helpers ─────────────────────────────────────────
 
-function stepDirName(index: number, name: string): string {
+export function stepDirName(index: number, name: string): string {
   const nn = String(index + 1).padStart(2, "0");
   const slug = name
     .toLowerCase()
@@ -73,50 +73,39 @@ function stepDirName(index: number, name: string): string {
   return `step-${nn}-${slug}`;
 }
 
-async function readPreviousResult(
+export async function buildPromptFromFiles(
   baseCwd: string,
   steps: StepConfig[],
   stepIndex: number
-): Promise<string | null> {
-  if (stepIndex === 0) return null;
-  const prevStep = steps[stepIndex - 1];
-  const prevDir = join(baseCwd, ".stepflow", stepDirName(prevStep.index, prevStep.name));
-  try {
-    return await readFile(join(prevDir, "result.md"), "utf-8");
-  } catch {
-    return null;
+): Promise<string> {
+  const sfDir = join(baseCwd, ".stepflow");
+  const step = steps[stepIndex];
+  const dirName = stepDirName(step.index, step.name);
+
+  // Read shared prompt
+  const sharedPrompt = await readFile(join(sfDir, "shared-prompt.md"), "utf-8");
+
+  // Read step prompt
+  const stepPrompt = await readFile(join(sfDir, dirName, "prompt.md"), "utf-8");
+
+  const parts: string[] = [sharedPrompt, "", stepPrompt];
+
+  // Read previous step's result.md if exists
+  if (stepIndex > 0) {
+    const prevStep = steps[stepIndex - 1];
+    const prevDirName = stepDirName(prevStep.index, prevStep.name);
+    try {
+      const prevResult = await readFile(
+        join(sfDir, prevDirName, "result.md"),
+        "utf-8"
+      );
+      parts.push("");
+      parts.push("## Previous Step Result");
+      parts.push(prevResult);
+    } catch {
+      // No previous result available
+    }
   }
-}
-
-function buildPrompt(
-  taskName: string,
-  step: StepConfig,
-  totalSteps: number,
-  previousResult: string | null,
-  stepDir: string
-): string {
-  const parts: string[] = [];
-
-  parts.push(`# Task: ${taskName}`);
-  parts.push(`## Step ${step.index + 1} of ${totalSteps}: ${step.name}`);
-  parts.push("");
-  parts.push(step.description);
-
-  if (previousResult) {
-    parts.push("");
-    parts.push("## Previous Step Result");
-    parts.push(previousResult);
-  }
-
-  parts.push("");
-  parts.push("## Instructions");
-  parts.push(`Work in the directory: ${step.cwd}`);
-  parts.push(
-    `When you are done, produce a comprehensive result.md file at: ${join(stepDir, "result.md")}`
-  );
-  parts.push(
-    "The result.md should summarize what you did, key decisions, file changes, and any issues encountered (up to 500 lines)."
-  );
 
   return parts.join("\n");
 }
@@ -157,14 +146,7 @@ export async function executeStep(
   const stepDir = join(baseCwd, ".stepflow", dirName);
   await mkdir(stepDir, { recursive: true });
 
-  const previousResult = await readPreviousResult(baseCwd, state.steps, stepIndex);
-  const prompt = buildPrompt(
-    state.taskName,
-    step,
-    state.steps.length,
-    previousResult,
-    stepDir
-  );
+  const prompt = await buildPromptFromFiles(baseCwd, state.steps, stepIndex);
 
   sseEmitter({ type: "step:start", data: { stepIndex, stepName: step.name } });
 
