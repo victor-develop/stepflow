@@ -48,10 +48,15 @@ export function createVisServer(
 
   // Read stdin and normalize
   const rl = createInterface({ input: process.stdin });
+  let startedAt: string | null = null;
+
   rl.on("line", (line) => {
     const record = tryParseJson(line);
     if (!record) return;
     const event = normalizeCliRecord(source, record);
+    const now = new Date().toISOString();
+    if (!startedAt) startedAt = now;
+    (event as any).receivedAt = now;
     events.push(event);
     broadcast(event);
   });
@@ -90,6 +95,7 @@ export function createVisServer(
       source,
       eventCount: events.length,
       finished,
+      startedAt,
     });
   });
 
