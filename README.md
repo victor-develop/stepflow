@@ -3,8 +3,9 @@
 Step-based agent orchestrator with a live web UI. Break complex tasks into steps, review and edit every prompt before execution, then let [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode](https://github.com/opencode-ai/opencode) execute them one by one — with real-time streaming, step-level control, and git integration.
 
 <p align="center">
-  <img src="docs/screenshot-input.png" width="380" alt="Task input form" />
-  <img src="docs/screenshot-filled.png" width="380" alt="Filled form with steps" />
+  <img src="docs/screenshot-input.png" width="320" alt="Task input form" />
+  <img src="docs/screenshot-filled.png" width="320" alt="Filled form with steps" />
+  <img src="docs/screenshot-review.png" width="320" alt="Prompt editor with shared and step prompts" />
 </p>
 
 ## Quick Start

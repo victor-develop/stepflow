@@ -154,11 +154,17 @@ export default function App() {
 
       try {
         // Generate prompt files on disk
-        await fetch("/api/generate", {
+        const genRes = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(config),
+          body: JSON.stringify({
+            name: config.taskName,
+            description: config.taskDescription,
+            cliTool: config.cliTool,
+            steps: config.steps,
+          }),
         });
+        if (!genRes.ok) throw new Error("Generate failed");
 
         // Load the generated prompts
         const res = await fetch("/api/prompts");
@@ -168,7 +174,7 @@ export default function App() {
           ...s,
           mode: "review",
           sharedPrompt: data.sharedPrompt ?? "",
-          stepPrompts: data.stepPrompts ?? [],
+          stepPrompts: data.steps ?? [],
         }));
       } catch {
         setState((s) => ({ ...s, mode: "error" }));
@@ -186,7 +192,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sharedPrompt: state.sharedPrompt,
-          stepPrompts: state.stepPrompts,
+          steps: state.stepPrompts,
         }),
       });
       setSaved(true);
@@ -206,7 +212,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sharedPrompt: state.sharedPrompt,
-          stepPrompts: state.stepPrompts,
+          steps: state.stepPrompts,
         }),
       });
     } catch {
@@ -263,7 +269,7 @@ export default function App() {
 
   const handleStop = useCallback(async () => {
     try {
-      await fetch("/api/execution/stop", { method: "POST" });
+      await fetch("/api/stop", { method: "POST" });
     } catch {
       // best effort
     }
@@ -280,10 +286,10 @@ export default function App() {
       setCompletedSteps((prev) => prev.filter((i) => i < fromStep));
 
       try {
-        await fetch("/api/execution/resume", {
+        await fetch("/api/resume", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fromStep }),
+          body: JSON.stringify({ startFrom: fromStep }),
         });
       } catch {
         setState((s) => ({ ...s, mode: "error" }));
