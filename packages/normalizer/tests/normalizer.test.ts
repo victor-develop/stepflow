@@ -134,6 +134,119 @@ describe("normalizeOpencodeEvent", () => {
   });
 });
 
+describe("normalizeClaudeEvent — raw API formats", () => {
+  it("normalizes raw message with role", () => {
+    const ev = normalizeClaudeEvent({
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: "Hello from Claude!" }],
+    });
+    expect(ev.family).toBe("message");
+    expect(ev.actor).toBe("assistant");
+    expect(ev.text).toBe("Hello from Claude!");
+  });
+
+  it("normalizes tool_use content block", () => {
+    const ev = normalizeClaudeEvent({
+      type: "tool_use",
+      name: "Read",
+      input: { path: "/tmp/test.txt" },
+    });
+    expect(ev.family).toBe("tool");
+    expect(ev.phase).toBe("completed");
+    expect(ev.toolName).toBe("Read");
+  });
+
+  it("normalizes tool_result", () => {
+    const ev = normalizeClaudeEvent({
+      type: "tool_result",
+      tool_use_id: "tu_123",
+      content: "file contents here",
+    });
+    expect(ev.family).toBe("tool");
+    expect(ev.output).toBe("file contents here");
+    expect(ev.error).toBeNull();
+  });
+
+  it("normalizes tool_result with error", () => {
+    const ev = normalizeClaudeEvent({
+      type: "tool_result",
+      tool_use_id: "tu_456",
+      content: "Permission denied",
+      is_error: true,
+    });
+    expect(ev.family).toBe("tool");
+    expect(ev.error).toBe("Permission denied");
+  });
+
+  it("normalizes content_block_start with tool_use", () => {
+    const ev = normalizeClaudeEvent({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "tool_use", name: "Bash", input: {} },
+    });
+    expect(ev.family).toBe("tool");
+    expect(ev.phase).toBe("started");
+    expect(ev.toolName).toBe("Bash");
+  });
+
+  it("normalizes content_block_start with thinking", () => {
+    const ev = normalizeClaudeEvent({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "thinking", thinking: "Let me think..." },
+    });
+    expect(ev.family).toBe("reasoning");
+    expect(ev.phase).toBe("started");
+    expect(ev.text).toBe("Let me think...");
+  });
+
+  it("normalizes content_block_delta with text", () => {
+    const ev = normalizeClaudeEvent({
+      type: "content_block_delta",
+      delta: { type: "text_delta", text: "partial text" },
+    });
+    expect(ev.family).toBe("message");
+    expect(ev.phase).toBe("updated");
+    expect(ev.text).toBe("partial text");
+  });
+
+  it("normalizes content_block_delta with input_json", () => {
+    const ev = normalizeClaudeEvent({
+      type: "content_block_delta",
+      delta: { type: "input_json_delta", partial_json: '{"path":' },
+    });
+    expect(ev.family).toBe("tool");
+    expect(ev.phase).toBe("updated");
+    expect(ev.input).toBe('{"path":');
+  });
+
+  it("normalizes content_block_delta with thinking", () => {
+    const ev = normalizeClaudeEvent({
+      type: "content_block_delta",
+      delta: { type: "thinking_delta", thinking: "more thoughts" },
+    });
+    expect(ev.family).toBe("reasoning");
+    expect(ev.text).toBe("more thoughts");
+  });
+
+  it("normalizes message_start", () => {
+    const ev = normalizeClaudeEvent({
+      type: "message_start",
+      message: { id: "msg_1", role: "assistant", usage: { input_tokens: 10 } },
+    });
+    expect(ev.family).toBe("message");
+    expect(ev.phase).toBe("started");
+    expect(ev.actor).toBe("assistant");
+  });
+
+  it("normalizes message_stop", () => {
+    const ev = normalizeClaudeEvent({ type: "message_stop" });
+    expect(ev.family).toBe("message");
+    expect(ev.phase).toBe("completed");
+  });
+});
+
 describe("normalizeCliRecord", () => {
   it("routes to codex", () => {
     const ev = normalizeCliRecord("codex", { type: "thread.started" });

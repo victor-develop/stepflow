@@ -342,6 +342,88 @@ export function normalizeClaudeEvent(record: any): NormalizedEvent {
     case "stream_event":
       return makeEvent("claude", type, subtype, "stream", "updated", record);
 
+    // ── Raw Anthropic API / content-block formats ──
+    // These appear when piping raw Claude API output or content blocks.
+
+    case "message":
+      return makeEvent("claude", type, record.role ?? subtype, "message",
+        record.stop_reason ? "completed" : "started", record, {
+          actor: record.role ?? "assistant",
+          messageId: record.id,
+          text: extractClaudeText(record),
+          usage: record.usage,
+        });
+
+    case "message_start":
+      return makeEvent("claude", type, subtype, "message", "started", record, {
+        actor: record.message?.role ?? "assistant",
+        messageId: record.message?.id,
+        usage: record.message?.usage,
+      });
+
+    case "message_delta":
+      return makeEvent("claude", type, subtype, "message", "updated", record, {
+        usage: record.usage,
+        text: record.delta?.stop_reason ? `[stop: ${record.delta.stop_reason}]` : undefined,
+      });
+
+    case "message_stop":
+      return makeEvent("claude", type, subtype, "message", "completed", record);
+
+    case "content_block_start": {
+      const cb = record.content_block ?? {};
+      if (cb.type === "tool_use") {
+        return makeEvent("claude", type, "tool_use", "tool", "started", record, {
+          toolName: cb.name,
+          toolKind: "tool",
+          input: cb.input,
+        });
+      }
+      if (cb.type === "thinking") {
+        return makeEvent("claude", type, "thinking", "reasoning", "started", record, {
+          text: cb.thinking,
+        });
+      }
+      return makeEvent("claude", type, cb.type ?? subtype, "message", "started", record, {
+        text: cb.text,
+      });
+    }
+
+    case "content_block_delta": {
+      const delta = record.delta ?? {};
+      if (delta.type === "input_json_delta") {
+        return makeEvent("claude", type, "tool_input", "tool", "updated", record, {
+          input: delta.partial_json,
+        });
+      }
+      if (delta.type === "thinking_delta") {
+        return makeEvent("claude", type, "thinking", "reasoning", "updated", record, {
+          text: delta.thinking,
+        });
+      }
+      return makeEvent("claude", type, delta.type ?? subtype, "message", "updated", record, {
+        text: delta.text,
+      });
+    }
+
+    case "content_block_stop":
+      return makeEvent("claude", type, subtype, "message", "completed", record);
+
+    case "tool_use":
+      return makeEvent("claude", type, subtype, "tool", "completed", record, {
+        toolKind: "tool",
+        toolName: record.name,
+        input: record.input,
+      });
+
+    case "tool_result":
+      return makeEvent("claude", type, subtype, "tool", "completed", record, {
+        toolKind: "tool",
+        toolName: record.tool_use_id,
+        output: record.content,
+        error: record.is_error ? (typeof record.content === "string" ? record.content : JSON.stringify(record.content)) : null,
+      });
+
     default:
       return makeEvent("claude", type, subtype, "meta", "updated", record);
   }
