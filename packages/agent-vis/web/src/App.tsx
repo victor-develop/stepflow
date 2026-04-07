@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Activity, ArrowDown, CheckCircle } from "lucide-react";
+import { Activity, ArrowUp, CheckCircle } from "lucide-react";
 import EventCard from "./components/EventCard";
 
 interface NormalizedEvent {
@@ -63,25 +63,25 @@ export default function App() {
     return () => es.close();
   }, []);
 
-  // Auto-scroll
+  // Auto-scroll to top (newest first)
   useEffect(() => {
     if (autoScroll && listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+      listRef.current.scrollTop = 0;
     }
   }, [events, autoScroll]);
 
   // Detect scroll position
   const handleScroll = useCallback(() => {
     if (!listRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = listRef.current;
-    const atBottom = scrollHeight - scrollTop - clientHeight < 80;
-    setAutoScroll(atBottom);
-    setShowScrollBtn(!atBottom);
+    const { scrollTop } = listRef.current;
+    const atTop = scrollTop < 80;
+    setAutoScroll(atTop);
+    setShowScrollBtn(!atTop);
   }, []);
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToTop = useCallback(() => {
     if (listRef.current) {
-      listRef.current.scrollTop = listRef.current.scrollHeight;
+      listRef.current.scrollTop = 0;
       setAutoScroll(true);
       setShowScrollBtn(false);
     }
@@ -116,18 +116,18 @@ export default function App() {
             Waiting for events...
           </div>
         )}
-        {events.map((event, idx) => (
-          <EventCard key={event.id} event={event} index={idx} />
+        {[...events].reverse().map((event, idx) => (
+          <EventCard key={event.id} event={event} index={events.length - 1 - idx} />
         ))}
       </div>
 
       {/* Scroll to bottom button */}
       {showScrollBtn && (
         <button
-          onClick={scrollToBottom}
-          className="fixed bottom-16 right-6 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-full p-2 shadow-lg transition-colors"
+          onClick={scrollToTop}
+          className="fixed top-16 right-6 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-full p-2 shadow-lg transition-colors"
         >
-          <ArrowDown className="w-5 h-5" />
+          <ArrowUp className="w-5 h-5" />
         </button>
       )}
 
