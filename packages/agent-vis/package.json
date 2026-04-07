@@ -1,6 +1,6 @@
 {
   "name": "@starsea/agent-vis",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Pipe agent CLI JSONL output to a live web visualizer",
   "type": "module",
   "bin": { "agent-vis": "bin/agent-vis.mjs" },

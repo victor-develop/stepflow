@@ -256,6 +256,18 @@ export default function EventCard({ event, index, firstReceivedAt }: Props) {
           )}
         </div>
       )}
+
+      {/* Raw JSON (always available) */}
+      <details className="mt-1.5 ml-10 group">
+        <summary className="text-xs text-zinc-600 cursor-pointer hover:text-zinc-400 flex items-center gap-1 select-none">
+          <ChevronRight className="w-3 h-3 group-open:hidden" />
+          <ChevronDown className="w-3 h-3 hidden group-open:block" />
+          Raw JSON
+        </summary>
+        <pre className="mt-1 text-xs text-zinc-500 bg-zinc-800/40 rounded p-2 overflow-x-auto max-h-64 border border-zinc-800">
+          {JSON.stringify(event.raw, null, 2)}
+        </pre>
+      </details>
     </div>
   );
 }
