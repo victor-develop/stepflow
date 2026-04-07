@@ -1,6 +1,6 @@
 # StepFlow
 
-Step-based agent orchestrator with a live web UI. Break complex tasks into steps, then let [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode](https://github.com/opencode-ai/opencode) execute them one by one — with real-time streaming, step-level control, and git integration.
+Step-based agent orchestrator with a live web UI. Break complex tasks into steps, review and edit every prompt before execution, then let [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode](https://github.com/opencode-ai/opencode) execute them one by one — with real-time streaming, step-level control, and git integration.
 
 <p align="center">
   <img src="docs/screenshot-input.png" width="380" alt="Task input form" />
@@ -33,35 +33,74 @@ You need **at least one** of these CLI tools installed locally:
 
 ## How It Works
 
-1. **Define your task** — Give it a name, description, and break it into ordered steps
-2. **Pick your CLI tool** — Claude Code, Codex, or OpenCode
-3. **Hit Generate & Start** — StepFlow generates a bash orchestration script and begins execution
-4. **Watch it work** — Each step runs the agent CLI in JSONL mode; the web UI parses and displays events in real time
-5. **Step handoff** — Every step produces a `result.md` (up to 500 lines) that feeds into the next step's prompt as context
+### 1. Define your task
 
-### Step isolation
+Give it a name, description, pick a CLI tool (Claude Code / Codex / OpenCode), and break it into ordered steps.
 
-Each step runs in its own directory under `.stepflow/`:
+### 2. Generate
+
+Click **Generate** — StepFlow creates prompt files on disk:
 
 ```
 .stepflow/
+├── shared-prompt.md          # shared context for all steps
 ├── step-01-setup/
-│   ├── output.jsonl    # raw JSONL events
-│   └── result.md       # step summary → fed to next step
+│   └── prompt.md             # this step's specific prompt
 ├── step-02-implement/
+│   └── prompt.md
+└── step-03-test/
+    └── prompt.md
+```
+
+### 3. Review & Edit Prompts
+
+The UI switches to a **prompt editor** where you can fine-tune:
+- **Shared prompt** — task-level context injected into every step
+- **Per-step prompts** — each step's specific instructions
+
+Edit as much as you need. These are plain markdown files — you can also edit them in your IDE.
+
+### 4. Commit
+
+Use the built-in **Git Panel** to commit your prompt files. This gives you version control over your orchestration before execution.
+
+### 5. Start Execution
+
+Click **Start Execution** when ready. Each step:
+- Reads its `prompt.md` + the shared prompt from disk
+- Injects the previous step's `result.md` as context
+- Runs the agent CLI in JSONL streaming mode
+- Produces a `result.md` (up to 500 lines) that feeds into the next step
+
+```
+.stepflow/
+├── shared-prompt.md
+├── step-01-setup/
+│   ├── prompt.md             # your prompt
+│   ├── output.jsonl          # raw JSONL events
+│   └── result.md             # step output → fed to next step
+├── step-02-implement/
+│   ├── prompt.md
 │   ├── output.jsonl
 │   └── result.md
 └── step-03-test/
+    ├── prompt.md
     ├── output.jsonl
     └── result.md
 ```
 
 ## Web UI Features
 
+### Prompt Editor
+
+After generating, review and edit all prompts in a monospace editor:
+- **Shared prompt** — appears at the top, applied to every step
+- **Step prompts** — one textarea per step, fully editable
+- **Save** — writes changes to disk immediately
+
 ### Live Agent Output
 
 Events from the agent CLI are parsed and categorized in real time:
-
 - **Messages** — assistant text output
 - **Tool calls** — commands, file edits, MCP tools (collapsible details)
 - **Reasoning** — model thinking (collapsible)
@@ -79,7 +118,7 @@ Horizontal step indicators at the top:
 
 ### Execution Controls
 
-- **Start** — begin execution from step 1
+- **Start Execution** — begins from step 1 (only after review)
 - **Stop** — terminate the current agent process
 - **Resume from Step N** — re-run from any step (keeps previous results)
 
@@ -99,12 +138,13 @@ src/
 ├── server.ts             Express server — REST API + SSE
 ├── normalizer.ts         JSONL event parser (codex/claude/opencode)
 ├── executor.ts           Step-by-step CLI execution engine
-├── script-gen.ts         Standalone bash script generator
+├── script-gen.ts         Prompt file + bash script generator
 └── git-ops.ts            Git operations
 web/
-├── App.tsx               Main React app
+├── App.tsx               Main React app (input → review → running)
 └── components/
-    ├── TaskInput.tsx      Task & step input form
+    ├── TaskInput.tsx      Task & step definition form
+    ├── PromptEditor.tsx   Shared + per-step prompt editor
     ├── StepBreadcrumbs.tsx  Step progress indicators
     ├── AgentOutput.tsx    Live event stream display
     ├── GitPanel.tsx       Git operations sidebar
@@ -136,8 +176,10 @@ StepFlow exposes a REST API on the same port:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/generate` | POST | Generate bash script from task + steps |
-| `/api/execute` | POST | Start execution |
+| `/api/generate` | POST | Generate prompt files from task + steps |
+| `/api/prompts` | GET | Read all prompt files (shared + per-step) |
+| `/api/prompts` | PUT | Save edited prompts to disk |
+| `/api/execute` | POST | Start execution (reads prompts from disk) |
 | `/api/stop` | POST | Stop current execution |
 | `/api/resume` | POST | Resume from a specific step |
 | `/api/events` | GET | SSE stream of execution events |
@@ -155,7 +197,7 @@ git clone https://github.com/victor-develop/stepflow.git
 cd stepflow
 npm install
 npm run build
-npm test           # 73 tests
+npm test           # 84 tests
 npm run dev        # start dev server
 ```
 
