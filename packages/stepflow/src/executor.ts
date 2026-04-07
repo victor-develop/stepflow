@@ -8,7 +8,7 @@ import {
   normalizeCliRecord,
   tryParseJson,
   extractFinalText,
-} from "./normalizer.js";
+} from "@starsea/normalizer";
 
 // ── Types ──────────────────────────────────────────────────────────
 

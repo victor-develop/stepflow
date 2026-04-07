@@ -1,0 +1,40 @@
+{
+  "name": "@starsea/agent-vis",
+  "version": "0.1.0",
+  "description": "Pipe agent CLI JSONL output to a live web visualizer",
+  "type": "module",
+  "bin": { "agent-vis": "bin/agent-vis.mjs" },
+  "main": "./dist/server.js",
+  "scripts": {
+    "build:server": "tsup src/server.ts --format esm --out-dir dist --dts",
+    "build:web": "vite build",
+    "build": "npm run build:server && npm run build:web",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "files": ["bin/", "dist/", "web-dist/"],
+  "author": "starsea",
+  "license": "MIT",
+  "keywords": ["agent", "visualizer", "cli", "jsonl", "codex", "claude", "opencode", "pipe"],
+  "dependencies": {
+    "@starsea/normalizer": "*",
+    "express": "^5.1.0",
+    "open": "^10.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.4",
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "lucide-react": "^0.475.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tailwindcss": "^4.1.4",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.2",
+    "vitest": "^3.1.1"
+  }
+}

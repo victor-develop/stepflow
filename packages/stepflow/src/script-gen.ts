@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { CliSource } from "./normalizer.js";
+import type { CliSource } from "@starsea/normalizer";
 
 // ── Types ──────────────────────────────────────────────────────────
 

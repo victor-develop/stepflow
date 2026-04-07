@@ -1,0 +1,24 @@
+{
+  "name": "@starsea/normalizer",
+  "version": "0.1.0",
+  "description": "JSONL event normalizer for Codex, Claude Code, and OpenCode CLI output",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --out-dir dist --dts",
+    "test": "vitest run"
+  },
+  "files": ["dist/"],
+  "author": "starsea",
+  "license": "MIT",
+  "keywords": ["jsonl", "normalizer", "codex", "claude", "opencode", "cli"],
+  "devDependencies": {
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.1"
+  }
+}

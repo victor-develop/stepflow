@@ -1,6 +1,6 @@
-# StepFlow
+# StepFlow Monorepo
 
-Step-based agent orchestrator with a live web UI. Break complex tasks into steps, review and edit every prompt before execution, then let [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex](https://github.com/openai/codex) or [OpenCode](https://github.com/opencode-ai/opencode) execute them one by one — with real-time streaming, step-level control, and git integration.
+A suite of tools for orchestrating and visualizing agent CLI tasks (Claude Code, Codex, OpenCode).
 
 <p align="center">
   <img src="docs/screenshot-input.png" width="320" alt="Task input form" />
@@ -8,23 +8,44 @@ Step-based agent orchestrator with a live web UI. Break complex tasks into steps
   <img src="docs/screenshot-review.png" width="320" alt="Prompt editor with shared and step prompts" />
 </p>
 
+## Packages
+
+| Package | Version | Description |
+|---------|---------|-------------|
+| [`@starsea/stepflow`](packages/stepflow/) | 0.3.0 | Step-based agent orchestrator with live web UI |
+| [`@starsea/agent-vis`](packages/agent-vis/) | 0.1.0 | Pipe agent JSONL output to a live web visualizer |
+| [`@starsea/normalizer`](packages/normalizer/) | 0.1.0 | Shared JSONL event normalizer for codex/claude/opencode |
+
 ## Quick Start
+
+### StepFlow — Multi-step orchestrator
 
 ```bash
 npx @starsea/stepflow
 ```
 
-Opens `http://localhost:3120` in your browser. That's it.
+Opens `http://localhost:3120`. Define tasks, break them into steps, review/edit prompts, then execute with real-time streaming.
 
-### Custom port
+### Agent Vis — Pipe any agent output to a web UI
 
 ```bash
-npx @starsea/stepflow --port 8080
+claude --dangerously-skip-permissions -p --verbose --output-format stream-json "your prompt" \
+  | npx @starsea/agent-vis claude
+```
+
+Opens `http://localhost:3130`. Works with any of the three CLIs:
+
+```bash
+# Codex
+codex exec --json "your prompt" | npx @starsea/agent-vis codex
+
+# OpenCode
+opencode run --format json "your prompt" | npx @starsea/agent-vis opencode
 ```
 
 ## Prerequisites
 
-You need **at least one** of these CLI tools installed locally:
+You need **at least one** of these CLI tools installed:
 
 | CLI | Install |
 |-----|---------|
@@ -32,11 +53,11 @@ You need **at least one** of these CLI tools installed locally:
 | Codex | `npm i -g @openai/codex` |
 | OpenCode | `go install github.com/opencode-ai/opencode@latest` |
 
-## How It Works
+## StepFlow Workflow
 
 ### 1. Define your task
 
-Give it a name, description, pick a CLI tool (Claude Code / Codex / OpenCode), and break it into ordered steps.
+Give it a name, description, pick a CLI tool, and break it into ordered steps.
 
 ### 2. Generate
 
@@ -63,7 +84,7 @@ Edit as much as you need. These are plain markdown files — you can also edit t
 
 ### 4. Commit
 
-Use the built-in **Git Panel** to commit your prompt files. This gives you version control over your orchestration before execution.
+Use the built-in **Git Panel** to commit your prompt files before execution.
 
 ### 5. Start Execution
 
@@ -71,33 +92,18 @@ Click **Start Execution** when ready. Each step:
 - Reads its `prompt.md` + the shared prompt from disk
 - Injects the previous step's `result.md` as context
 - Runs the agent CLI in JSONL streaming mode
-- Produces a `result.md` (up to 500 lines) that feeds into the next step
+- Produces a `result.md` that feeds into the next step
 
-```
-.stepflow/
-├── shared-prompt.md
-├── step-01-setup/
-│   ├── prompt.md             # your prompt
-│   ├── output.jsonl          # raw JSONL events
-│   └── result.md             # step output → fed to next step
-├── step-02-implement/
-│   ├── prompt.md
-│   ├── output.jsonl
-│   └── result.md
-└── step-03-test/
-    ├── prompt.md
-    ├── output.jsonl
-    └── result.md
-```
+## Agent Vis Features
+
+- **Zero config** — just pipe and go
+- **Real-time SSE streaming** — events appear as they arrive
+- **Event categorization** — messages, tool calls, reasoning, file changes, errors
+- **Collapsible details** — expand tool calls and reasoning blocks
+- **Late join** — open the browser any time, all buffered events replay instantly
+- **Auto-detection** — pass `codex`, `claude`, or `opencode` as the source argument
 
 ## Web UI Features
-
-### Prompt Editor
-
-After generating, review and edit all prompts in a monospace editor:
-- **Shared prompt** — appears at the top, applied to every step
-- **Step prompts** — one textarea per step, fully editable
-- **Save** — writes changes to disk immediately
 
 ### Live Agent Output
 
@@ -106,55 +112,19 @@ Events from the agent CLI are parsed and categorized in real time:
 - **Tool calls** — commands, file edits, MCP tools (collapsible details)
 - **Reasoning** — model thinking (collapsible)
 - **File changes** — created/modified files
-- **Plans** — todo lists and task breakdowns
 - **Errors** — highlighted in red
 
 ### Step Breadcrumbs
 
-Horizontal step indicators at the top:
-- Completed steps (green)
-- Active step (blue, animated)
-- Pending steps (gray)
-- Click any completed step to resume from there
-
-### Execution Controls
-
-- **Start Execution** — begins from step 1 (only after review)
-- **Stop** — terminate the current agent process
-- **Resume from Step N** — re-run from any step (keeps previous results)
+Horizontal step indicators: completed (green), active (blue, animated), pending (gray). Click any completed step to resume from there.
 
 ### Git Panel
 
-Built-in git operations without leaving the UI:
-- View current branch and switch branches
-- Create new branches
-- View git status and diff
-- Commit changes with a message
+Built-in git operations: view/switch branches, create branches, view status/diff, commit changes.
 
-## Architecture
+## JSONL Event Normalization
 
-```
-bin/stepflow.mjs          CLI entry point (npx)
-src/
-├── server.ts             Express server — REST API + SSE
-├── normalizer.ts         JSONL event parser (codex/claude/opencode)
-├── executor.ts           Step-by-step CLI execution engine
-├── script-gen.ts         Prompt file + bash script generator
-└── git-ops.ts            Git operations
-web/
-├── App.tsx               Main React app (input → review → running)
-└── components/
-    ├── TaskInput.tsx      Task & step definition form
-    ├── PromptEditor.tsx   Shared + per-step prompt editor
-    ├── StepBreadcrumbs.tsx  Step progress indicators
-    ├── AgentOutput.tsx    Live event stream display
-    ├── GitPanel.tsx       Git operations sidebar
-    └── ControlBar.tsx     Start/Stop/Resume controls
-```
-
-### JSONL Event Normalization
-
-StepFlow normalizes the different JSONL output formats from each CLI into a unified event schema (adapted from [blue-core](https://github.com/victor-develop/blue-core)):
+All three packages share a unified event schema via `@starsea/normalizer` (adapted from [blue-core](https://github.com/victor-develop/blue-core)):
 
 ```ts
 interface NormalizedEvent {
@@ -165,31 +135,51 @@ interface NormalizedEvent {
   text?: string;
   toolName?: string;
   command?: string;
-  // ...
 }
 ```
 
-This abstraction means the UI works identically regardless of which CLI backend you choose.
+## Monorepo Structure
+
+```
+stepflow/
+├── packages/
+│   ├── normalizer/         @starsea/normalizer — shared JSONL normalizer
+│   │   ├── src/index.ts
+│   │   └── tests/
+│   ├── stepflow/           @starsea/stepflow — orchestrator + web UI
+│   │   ├── bin/stepflow.mjs
+│   │   ├── src/            server, executor, script-gen, git-ops
+│   │   └── web/            React + Tailwind frontend
+│   └── agent-vis/          @starsea/agent-vis — pipe visualizer
+│       ├── bin/agent-vis.mjs
+│       ├── src/server.ts
+│       └── web/            React + Tailwind frontend
+├── docs/                   Screenshots
+└── package.json            npm workspaces root
+```
 
 ## API
 
-StepFlow exposes a REST API on the same port:
+### StepFlow API (port 3120)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/generate` | POST | Generate prompt files from task + steps |
-| `/api/prompts` | GET | Read all prompt files (shared + per-step) |
+| `/api/prompts` | GET | Read all prompt files |
 | `/api/prompts` | PUT | Save edited prompts to disk |
-| `/api/execute` | POST | Start execution (reads prompts from disk) |
+| `/api/execute` | POST | Start execution |
 | `/api/stop` | POST | Stop current execution |
 | `/api/resume` | POST | Resume from a specific step |
 | `/api/events` | GET | SSE stream of execution events |
 | `/api/status` | GET | Current execution state |
-| `/api/git/status` | GET | Git status |
-| `/api/git/branches` | GET | List branches |
-| `/api/git/commit` | POST | Create a commit |
-| `/api/git/checkout` | POST | Switch/create branch |
-| `/api/git/diff` | GET | Git diff |
+| `/api/git/*` | GET/POST | Git operations |
+
+### Agent Vis API (port 3130)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/events` | GET | SSE stream (replays buffered events) |
+| `/api/state` | GET | Current state + all buffered events |
 
 ## Development
 
@@ -197,9 +187,8 @@ StepFlow exposes a REST API on the same port:
 git clone https://github.com/victor-develop/stepflow.git
 cd stepflow
 npm install
-npm run build
-npm test           # 84 tests
-npm run dev        # start dev server
+npm run build --workspaces
+npm test --workspaces
 ```
 
 ## License
