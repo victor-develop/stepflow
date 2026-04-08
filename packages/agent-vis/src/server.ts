@@ -53,12 +53,14 @@ export function createVisServer(
   rl.on("line", (line) => {
     const record = tryParseJson(line);
     if (!record) return;
-    const event = normalizeCliRecord(source, record);
+    const normalized = normalizeCliRecord(source, record);
     const now = new Date().toISOString();
     if (!startedAt) startedAt = now;
-    (event as any).receivedAt = now;
-    events.push(event);
-    broadcast(event);
+    for (const event of normalized) {
+      (event as any).receivedAt = now;
+      events.push(event);
+      broadcast(event);
+    }
   });
   rl.on("close", () => {
     finished = true;

@@ -167,9 +167,11 @@ export async function executeStep(
     rl.on("line", (line) => {
       const parsed = tryParseJson(line);
       if (parsed) {
-        const event = normalizeCliRecord(cliTool, parsed);
-        state.events[stepIndex].push(event);
-        sseEmitter({ type: "step:event", data: { stepIndex, event } });
+        const events = normalizeCliRecord(cliTool, parsed);
+        for (const event of events) {
+          state.events[stepIndex].push(event);
+          sseEmitter({ type: "step:event", data: { stepIndex, event } });
+        }
       }
     });
 

@@ -222,7 +222,13 @@ function extractReasoningText(item: any): string | undefined {
 
 // ── Claude Normalizer ──────────────────────────────────────────────
 
-export function normalizeClaudeEvent(record: any): NormalizedEvent {
+/**
+ * Normalize a Claude Code stream-json record.
+ * Returns an array because one record (e.g. "assistant") may contain
+ * multiple content blocks (thinking, tool_use, text) that each become
+ * their own NormalizedEvent.
+ */
+export function normalizeClaudeEvent(record: any): NormalizedEvent[] {
   const type: string = record.type ?? "unknown";
   const subtype: string | null = record.subtype ?? null;
 
@@ -230,63 +236,145 @@ export function normalizeClaudeEvent(record: any): NormalizedEvent {
     case "system": {
       switch (subtype) {
         case "init":
-          return makeEvent("claude", type, subtype, "session", "started", record, {
+          return [makeEvent("claude", type, subtype, "session", "started", record, {
             sessionId: record.session_id,
             status: record.status,
-          });
+          })];
 
         case "compact_boundary":
-          return makeEvent("claude", type, subtype, "session", "updated", record);
+          return [makeEvent("claude", type, subtype, "session", "updated", record)];
 
         case "status":
-          return makeEvent("claude", type, subtype, "status", "updated", record, {
+          return [makeEvent("claude", type, subtype, "status", "updated", record, {
             status: record.message ?? record.status,
-          });
+          })];
 
         case "api_retry":
-          return makeEvent("claude", type, subtype, "status", "updated", record, {
+          return [makeEvent("claude", type, subtype, "status", "updated", record, {
             error: record.message ?? record.error,
-          });
+          })];
 
         case "task_started":
-          return makeEvent("claude", type, subtype, "task", "started", record);
+          return [makeEvent("claude", type, subtype, "task", "started", record)];
 
         case "task_completed":
-          return makeEvent("claude", type, subtype, "task", "completed", record);
+          return [makeEvent("claude", type, subtype, "task", "completed", record)];
 
         case "hook_start":
-          return makeEvent("claude", type, subtype, "hook", "started", record, {
+          return [makeEvent("claude", type, subtype, "hook", "started", record, {
             toolName: record.hook_name ?? record.name,
-          });
+          })];
 
         case "hook_end":
-          return makeEvent("claude", type, subtype, "hook", "completed", record, {
+          return [makeEvent("claude", type, subtype, "hook", "completed", record, {
             toolName: record.hook_name ?? record.name,
             exitCode: record.exit_code ?? null,
-          });
+          })];
 
         default:
-          return makeEvent("claude", type, subtype, "meta", "updated", record);
+          return [makeEvent("claude", type, subtype, "meta", "updated", record)];
       }
     }
 
-    case "assistant":
-      return makeEvent("claude", type, subtype, "message", "completed", record, {
-        actor: "assistant",
-        messageId: record.message_id,
-        text: extractClaudeText(record),
-        usage: record.usage,
-        costUsd: record.cost_usd ?? null,
-      });
+    // ── Claude Code "assistant" — expand content blocks ──
+    case "assistant": {
+      const msg = record.message ?? {};
+      const content: any[] = Array.isArray(msg.content) ? msg.content : [];
+      const sessionId = record.session_id;
+      const messageId = msg.id;
+      const usage = msg.usage;
 
-    case "user":
-      return makeEvent("claude", type, subtype, "message", "completed", record, {
+      // If no content blocks, emit a single message event
+      if (content.length === 0) {
+        return [makeEvent("claude", type, subtype, "message", "completed", record, {
+          actor: "assistant",
+          messageId,
+          sessionId,
+          usage,
+        })];
+      }
+
+      return content.map((block: any) => {
+        switch (block.type) {
+          case "text":
+            return makeEvent("claude", type, "text", "message", "completed", record, {
+              actor: "assistant",
+              messageId,
+              sessionId,
+              text: block.text,
+              usage,
+            });
+
+          case "tool_use":
+            return makeEvent("claude", type, "tool_use", "tool", "started", record, {
+              toolKind: "tool",
+              toolName: block.name,
+              itemId: block.id,
+              input: block.input,
+              sessionId,
+            });
+
+          case "thinking":
+            return makeEvent("claude", type, "thinking", "reasoning", "updated", record, {
+              text: block.thinking,
+              sessionId,
+            });
+
+          default:
+            return makeEvent("claude", type, block.type ?? "unknown", "meta", "updated", record, {
+              sessionId,
+            });
+        }
+      });
+    }
+
+    // ── Claude Code "user" — extract tool results ──
+    case "user": {
+      const msg = record.message ?? {};
+      const content: any[] = Array.isArray(msg.content) ? msg.content : [];
+      const sessionId = record.session_id;
+      const toolResult = record.tool_use_result;
+
+      // New format: tool_use_result at top level
+      if (toolResult) {
+        return [makeEvent("claude", type, "tool_result", "tool", "completed", record, {
+          actor: "user",
+          toolName: toolResult.name,
+          output: toolResult.content,
+          error: toolResult.is_error ? (typeof toolResult.content === "string" ? toolResult.content : JSON.stringify(toolResult.content)) : null,
+          sessionId,
+        })];
+      }
+
+      // Content blocks
+      if (content.length > 0) {
+        return content.map((block: any) => {
+          if (block.type === "tool_result") {
+            return makeEvent("claude", type, "tool_result", "tool", "completed", record, {
+              actor: "user",
+              toolName: block.tool_use_id,
+              output: block.content,
+              error: block.is_error ? (typeof block.content === "string" ? block.content : JSON.stringify(block.content)) : null,
+              sessionId,
+            });
+          }
+          return makeEvent("claude", type, block.type ?? "user", "meta", "updated", record, {
+            actor: "user",
+            text: block.text,
+            sessionId,
+          });
+        });
+      }
+
+      return [makeEvent("claude", type, subtype, "message", "completed", record, {
         actor: "user",
         text: extractClaudeText(record),
-      });
+        sessionId,
+      })];
+    }
 
     case "result":
-      return makeEvent(
+      return [makeEvent(
         "claude",
         type,
         subtype,
@@ -294,142 +382,142 @@ export function normalizeClaudeEvent(record: any): NormalizedEvent {
         subtype === "error" ? "failed" : "completed",
         record,
         {
-          text: extractClaudeText(record),
+          text: record.result ?? extractClaudeText(record),
           usage: record.usage,
-          costUsd: record.cost_usd ?? null,
+          costUsd: record.total_cost_usd ?? record.cost_usd ?? null,
           error: subtype === "error" ? (record.error ?? record.message) : null,
           exitCode: record.exit_code ?? null,
         }
-      );
+      )];
 
     case "rate_limit_event":
-      return makeEvent("claude", type, subtype, "rate_limit", "updated", record, {
-        error: record.message ?? "Rate limited",
-      });
+      return [makeEvent("claude", type, subtype, "rate_limit", "updated", record, {
+        error: record.rate_limit_info?.status ?? record.message ?? "Rate limited",
+      })];
 
     case "tool_progress":
-      return makeEvent("claude", type, subtype, "tool", "updated", record, {
+      return [makeEvent("claude", type, subtype, "tool", "updated", record, {
         toolKind: record.tool_type ?? "tool",
         toolName: record.tool_name ?? record.name,
         input: record.input,
         output: record.content ?? record.output,
-      });
+      })];
 
     case "streamlined_text":
-      return makeEvent("claude", type, subtype, "stream", "updated", record, {
+      return [makeEvent("claude", type, subtype, "stream", "updated", record, {
         text: record.text ?? record.content,
-      });
+      })];
 
     case "streamlined_tool_use_summary":
     case "tool_use_summary":
-      return makeEvent("claude", type, subtype, "tool", "completed", record, {
+      return [makeEvent("claude", type, subtype, "tool", "completed", record, {
         toolKind: record.tool_type ?? "tool",
         toolName: record.tool_name ?? record.name,
         input: record.input,
         output: record.output ?? record.result,
-      });
+      })];
 
     case "auth_status":
-      return makeEvent("claude", type, subtype, "status", "updated", record, {
+      return [makeEvent("claude", type, subtype, "status", "updated", record, {
         status: record.status ?? record.message,
-      });
+      })];
 
     case "prompt_suggestion":
-      return makeEvent("claude", type, subtype, "meta", "updated", record, {
+      return [makeEvent("claude", type, subtype, "meta", "updated", record, {
         text: record.suggestion ?? record.text,
-      });
+      })];
 
     case "stream_event":
-      return makeEvent("claude", type, subtype, "stream", "updated", record);
+      return [makeEvent("claude", type, subtype, "stream", "updated", record)];
 
     // ── Raw Anthropic API / content-block formats ──
-    // These appear when piping raw Claude API output or content blocks.
 
     case "message":
-      return makeEvent("claude", type, record.role ?? subtype, "message",
+      return [makeEvent("claude", type, record.role ?? subtype, "message",
         record.stop_reason ? "completed" : "started", record, {
           actor: record.role ?? "assistant",
           messageId: record.id,
           text: extractClaudeText(record),
           usage: record.usage,
-        });
+        })];
 
     case "message_start":
-      return makeEvent("claude", type, subtype, "message", "started", record, {
+      return [makeEvent("claude", type, subtype, "message", "started", record, {
         actor: record.message?.role ?? "assistant",
         messageId: record.message?.id,
         usage: record.message?.usage,
-      });
+      })];
 
     case "message_delta":
-      return makeEvent("claude", type, subtype, "message", "updated", record, {
+      return [makeEvent("claude", type, subtype, "message", "updated", record, {
         usage: record.usage,
         text: record.delta?.stop_reason ? `[stop: ${record.delta.stop_reason}]` : undefined,
-      });
+      })];
 
     case "message_stop":
-      return makeEvent("claude", type, subtype, "message", "completed", record);
+      return [makeEvent("claude", type, subtype, "message", "completed", record)];
 
     case "content_block_start": {
       const cb = record.content_block ?? {};
       if (cb.type === "tool_use") {
-        return makeEvent("claude", type, "tool_use", "tool", "started", record, {
+        return [makeEvent("claude", type, "tool_use", "tool", "started", record, {
           toolName: cb.name,
           toolKind: "tool",
           input: cb.input,
-        });
+        })];
       }
       if (cb.type === "thinking") {
-        return makeEvent("claude", type, "thinking", "reasoning", "started", record, {
+        return [makeEvent("claude", type, "thinking", "reasoning", "started", record, {
           text: cb.thinking,
-        });
+        })];
       }
-      return makeEvent("claude", type, cb.type ?? subtype, "message", "started", record, {
+      return [makeEvent("claude", type, cb.type ?? subtype, "message", "started", record, {
         text: cb.text,
-      });
+      })];
     }
 
     case "content_block_delta": {
       const delta = record.delta ?? {};
       if (delta.type === "input_json_delta") {
-        return makeEvent("claude", type, "tool_input", "tool", "updated", record, {
+        return [makeEvent("claude", type, "tool_input", "tool", "updated", record, {
           input: delta.partial_json,
-        });
+        })];
       }
       if (delta.type === "thinking_delta") {
-        return makeEvent("claude", type, "thinking", "reasoning", "updated", record, {
+        return [makeEvent("claude", type, "thinking", "reasoning", "updated", record, {
           text: delta.thinking,
-        });
+        })];
       }
-      return makeEvent("claude", type, delta.type ?? subtype, "message", "updated", record, {
+      return [makeEvent("claude", type, delta.type ?? subtype, "message", "updated", record, {
         text: delta.text,
-      });
+      })];
     }
 
     case "content_block_stop":
-      return makeEvent("claude", type, subtype, "message", "completed", record);
+      return [makeEvent("claude", type, subtype, "message", "completed", record)];
 
     case "tool_use":
-      return makeEvent("claude", type, subtype, "tool", "completed", record, {
+      return [makeEvent("claude", type, subtype, "tool", "completed", record, {
         toolKind: "tool",
         toolName: record.name,
         input: record.input,
-      });
+      })];
 
     case "tool_result":
-      return makeEvent("claude", type, subtype, "tool", "completed", record, {
+      return [makeEvent("claude", type, subtype, "tool", "completed", record, {
         toolKind: "tool",
         toolName: record.tool_use_id,
         output: record.content,
         error: record.is_error ? (typeof record.content === "string" ? record.content : JSON.stringify(record.content)) : null,
-      });
+      })];
 
     default:
-      return makeEvent("claude", type, subtype, "meta", "updated", record);
+      return [makeEvent("claude", type, subtype, "meta", "updated", record)];
   }
 }
 
 function extractClaudeText(record: any): string | undefined {
+  if (record.result) return record.result;
   if (record.text) return record.text;
   if (typeof record.content === "string") return record.content;
   if (Array.isArray(record.content)) {
@@ -438,7 +526,15 @@ function extractClaudeText(record: any): string | undefined {
       .map((c: any) => c.text ?? "")
       .join("");
   }
-  if (record.message && typeof record.message === "string") return record.message;
+  // Claude Code wraps content in record.message.content
+  const msg = record.message;
+  if (msg && Array.isArray(msg.content)) {
+    const texts = msg.content
+      .filter((c: any) => c.type === "text")
+      .map((c: any) => c.text ?? "");
+    if (texts.length > 0) return texts.join("");
+  }
+  if (msg && typeof msg === "string") return msg;
   return undefined;
 }
 
@@ -486,17 +582,21 @@ export function normalizeOpencodeEvent(record: any): NormalizedEvent {
 
 // ── Unified Entry Point ────────────────────────────────────────────
 
+/**
+ * Normalize one JSONL record into one or more NormalizedEvents.
+ * Claude Code records may expand into multiple events (one per content block).
+ */
 export function normalizeCliRecord(
   source: CliSource,
   record: any
-): NormalizedEvent {
+): NormalizedEvent[] {
   switch (source) {
     case "codex":
-      return normalizeCodexEvent(record);
+      return [normalizeCodexEvent(record)];
     case "claude":
       return normalizeClaudeEvent(record);
     case "opencode":
-      return normalizeOpencodeEvent(record);
+      return [normalizeOpencodeEvent(record)];
   }
 }
 
@@ -528,5 +628,5 @@ export function collectCliOutput(
   jsonlText: string
 ): NormalizedEvent[] {
   const records = parseJsonl(jsonlText);
-  return records.map((r) => normalizeCliRecord(source, r));
+  return records.flatMap((r) => normalizeCliRecord(source, r));
 }

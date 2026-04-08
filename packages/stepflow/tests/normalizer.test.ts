@@ -199,139 +199,124 @@ describe("normalizeCodexEvent", () => {
 
 // ── Claude Normalizer ─────────────────────────────────────────────
 
+// Helper: normalizeClaudeEvent now returns arrays
+function claudeFirst(record: any) {
+  return normalizeClaudeEvent(record)[0];
+}
+
 describe("normalizeClaudeEvent", () => {
   it("normalizes system.init", () => {
-    const event = normalizeClaudeEvent({
-      type: "system",
-      subtype: "init",
-      session_id: "s1",
-    });
+    const event = claudeFirst({ type: "system", subtype: "init", session_id: "s1" });
     expect(event.family).toBe("session");
     expect(event.phase).toBe("started");
     expect(event.sessionId).toBe("s1");
   });
 
   it("normalizes system.compact_boundary", () => {
-    const event = normalizeClaudeEvent({
-      type: "system",
-      subtype: "compact_boundary",
-    });
+    const event = claudeFirst({ type: "system", subtype: "compact_boundary" });
     expect(event.family).toBe("session");
     expect(event.phase).toBe("updated");
   });
 
   it("normalizes system.status", () => {
-    const event = normalizeClaudeEvent({
-      type: "system",
-      subtype: "status",
-      message: "Processing...",
-    });
+    const event = claudeFirst({ type: "system", subtype: "status", message: "Processing..." });
     expect(event.family).toBe("status");
     expect(event.status).toBe("Processing...");
   });
 
   it("normalizes system.task_started", () => {
-    const event = normalizeClaudeEvent({
-      type: "system",
-      subtype: "task_started",
-    });
+    const event = claudeFirst({ type: "system", subtype: "task_started" });
     expect(event.family).toBe("task");
     expect(event.phase).toBe("started");
   });
 
-  it("normalizes assistant message", () => {
-    const event = normalizeClaudeEvent({
+  it("normalizes assistant with message.content", () => {
+    const evs = normalizeClaudeEvent({
       type: "assistant",
-      content: [{ type: "text", text: "Hello!" }],
-      usage: { input_tokens: 10 },
+      message: { content: [{ type: "text", text: "Hello!" }], usage: { input_tokens: 10 } },
     });
-    expect(event.family).toBe("message");
-    expect(event.phase).toBe("completed");
-    expect(event.actor).toBe("assistant");
-    expect(event.text).toBe("Hello!");
+    expect(evs).toHaveLength(1);
+    expect(evs[0].family).toBe("message");
+    expect(evs[0].actor).toBe("assistant");
+    expect(evs[0].text).toBe("Hello!");
   });
 
-  it("normalizes user message", () => {
-    const event = normalizeClaudeEvent({
-      type: "user",
-      content: "Hi there",
+  it("expands assistant with multiple content blocks", () => {
+    const evs = normalizeClaudeEvent({
+      type: "assistant",
+      message: {
+        content: [
+          { type: "thinking", thinking: "hmm" },
+          { type: "tool_use", id: "tu1", name: "Bash", input: { command: "ls" } },
+        ],
+      },
     });
-    expect(event.family).toBe("message");
-    expect(event.actor).toBe("user");
-    expect(event.text).toBe("Hi there");
+    expect(evs).toHaveLength(2);
+    expect(evs[0].family).toBe("reasoning");
+    expect(evs[1].family).toBe("tool");
+    expect(evs[1].toolName).toBe("Bash");
+  });
+
+  it("normalizes user with tool_use_result", () => {
+    const evs = normalizeClaudeEvent({
+      type: "user",
+      tool_use_result: { name: "Bash", content: "output", is_error: false },
+    });
+    expect(evs[0].family).toBe("tool");
+    expect(evs[0].output).toBe("output");
   });
 
   it("normalizes result success", () => {
-    const event = normalizeClaudeEvent({
+    const event = claudeFirst({
       type: "result",
       subtype: "success",
-      text: "Done",
+      result: "Done",
+      total_cost_usd: 0.05,
       usage: { total_tokens: 50 },
     });
     expect(event.family).toBe("turn");
     expect(event.phase).toBe("completed");
     expect(event.text).toBe("Done");
+    expect(event.costUsd).toBe(0.05);
   });
 
   it("normalizes result error", () => {
-    const event = normalizeClaudeEvent({
-      type: "result",
-      subtype: "error",
-      error: "Failed",
-    });
+    const event = claudeFirst({ type: "result", subtype: "error", error: "Failed" });
     expect(event.family).toBe("turn");
     expect(event.phase).toBe("failed");
     expect(event.error).toBe("Failed");
   });
 
   it("normalizes rate_limit_event", () => {
-    const event = normalizeClaudeEvent({
-      type: "rate_limit_event",
-      message: "Rate limited",
-    });
+    const event = claudeFirst({ type: "rate_limit_event", message: "Rate limited" });
     expect(event.family).toBe("rate_limit");
-    expect(event.error).toBe("Rate limited");
   });
 
   it("normalizes tool_progress", () => {
-    const event = normalizeClaudeEvent({
-      type: "tool_progress",
-      tool_name: "Bash",
-      content: "running...",
-    });
+    const event = claudeFirst({ type: "tool_progress", tool_name: "Bash", content: "running..." });
     expect(event.family).toBe("tool");
     expect(event.toolName).toBe("Bash");
   });
 
   it("normalizes streamlined_text", () => {
-    const event = normalizeClaudeEvent({
-      type: "streamlined_text",
-      text: "partial output",
-    });
+    const event = claudeFirst({ type: "streamlined_text", text: "partial output" });
     expect(event.family).toBe("stream");
     expect(event.text).toBe("partial output");
   });
 
   it("normalizes tool_use_summary", () => {
-    const event = normalizeClaudeEvent({
-      type: "tool_use_summary",
-      tool_name: "Read",
-      output: "file content",
-    });
+    const event = claudeFirst({ type: "tool_use_summary", tool_name: "Read", output: "file content" });
     expect(event.family).toBe("tool");
     expect(event.phase).toBe("completed");
   });
 
   it("normalizes auth_status", () => {
-    const event = normalizeClaudeEvent({
-      type: "auth_status",
-      status: "authenticated",
-    });
+    const event = claudeFirst({ type: "auth_status", status: "authenticated" });
     expect(event.family).toBe("status");
   });
 
   it("normalizes unknown type as meta", () => {
-    const event = normalizeClaudeEvent({ type: "future_event" });
+    const event = claudeFirst({ type: "future_event" });
     expect(event.family).toBe("meta");
   });
 });
@@ -396,25 +381,28 @@ describe("normalizeOpencodeEvent", () => {
 // ── normalizeCliRecord ────────────────────────────────────────────
 
 describe("normalizeCliRecord", () => {
-  it("routes to codex normalizer", () => {
-    const event = normalizeCliRecord("codex", { type: "turn.started" });
-    expect(event.source).toBe("codex");
-    expect(event.family).toBe("turn");
+  it("routes to codex normalizer (returns array)", () => {
+    const evs = normalizeCliRecord("codex", { type: "turn.started" });
+    expect(evs).toHaveLength(1);
+    expect(evs[0].source).toBe("codex");
+    expect(evs[0].family).toBe("turn");
   });
 
-  it("routes to claude normalizer", () => {
-    const event = normalizeCliRecord("claude", {
+  it("routes to claude normalizer (returns array)", () => {
+    const evs = normalizeCliRecord("claude", {
       type: "assistant",
-      text: "hi",
+      message: { content: [{ type: "text", text: "hi" }] },
     });
-    expect(event.source).toBe("claude");
-    expect(event.family).toBe("message");
+    expect(evs).toHaveLength(1);
+    expect(evs[0].source).toBe("claude");
+    expect(evs[0].family).toBe("message");
   });
 
-  it("routes to opencode normalizer", () => {
-    const event = normalizeCliRecord("opencode", { type: "text", text: "hi" });
-    expect(event.source).toBe("opencode");
-    expect(event.family).toBe("message");
+  it("routes to opencode normalizer (returns array)", () => {
+    const evs = normalizeCliRecord("opencode", { type: "text", text: "hi" });
+    expect(evs).toHaveLength(1);
+    expect(evs[0].source).toBe("opencode");
+    expect(evs[0].family).toBe("message");
   });
 });
 
@@ -423,18 +411,24 @@ describe("normalizeCliRecord", () => {
 describe("extractFinalText", () => {
   it("extracts last assistant message", () => {
     const events = [
-      normalizeCliRecord("claude", { type: "assistant", text: "first" }),
-      normalizeCliRecord("claude", { type: "assistant", text: "second" }),
+      ...normalizeCliRecord("claude", {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "first" }] },
+      }),
+      ...normalizeCliRecord("claude", {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "second" }] },
+      }),
     ];
     expect(extractFinalText(events)).toBe("second");
   });
 
   it("falls back to turn completed text", () => {
     const events = [
-      normalizeCliRecord("claude", {
+      ...normalizeCliRecord("claude", {
         type: "result",
         subtype: "success",
-        text: "done",
+        result: "done",
       }),
     ];
     expect(extractFinalText(events)).toBe("done");
@@ -451,8 +445,8 @@ describe("collectCliOutput", () => {
   it("parses JSONL and normalizes events", () => {
     const jsonl = [
       '{"type":"system","subtype":"init","session_id":"s1"}',
-      '{"type":"assistant","text":"Hello"}',
-      '{"type":"result","subtype":"success","text":"Done"}',
+      '{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}',
+      '{"type":"result","subtype":"success","result":"Done"}',
     ].join("\n");
 
     const events = collectCliOutput("claude", jsonl);

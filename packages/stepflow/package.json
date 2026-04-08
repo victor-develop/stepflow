@@ -1,6 +1,6 @@
 {
   "name": "@starsea/stepflow",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Step-based agent orchestrator with live web UI for Codex/Claude Code/OpenCode CLI",
   "type": "module",
   "bin": {
