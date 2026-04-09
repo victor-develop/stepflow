@@ -22,6 +22,7 @@ interface Props {
   event: any; // NormalizedEvent
   index: number;
   firstReceivedAt?: string;
+  stepName?: string;
 }
 
 const FAMILY_CONFIG: Record<string, { label: string; icon: any; color: string; bg: string }> = {
@@ -73,7 +74,7 @@ function formatTimestamp(iso: string): string {
   } as any);
 }
 
-export default function EventCard({ event, index, firstReceivedAt }: Props) {
+export default function EventCard({ event, index, firstReceivedAt, stepName }: Props) {
   const [expanded, setExpanded] = useState(false);
   const config = FAMILY_CONFIG[event.family] ?? FAMILY_CONFIG.meta;
   const Icon = config.icon;
@@ -107,6 +108,11 @@ export default function EventCard({ event, index, firstReceivedAt }: Props) {
         <span className="text-zinc-600 font-mono w-8 text-right shrink-0">
           {index + 1}
         </span>
+        {stepName && (
+          <span className="text-[10px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded truncate max-w-20">
+            {stepName}
+          </span>
+        )}
         <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium ${config.color} ${config.bg}`}>
           <Icon className="w-3.5 h-3.5" />
           {config.label}

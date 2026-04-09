@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Activity, ArrowUp, CheckCircle, Filter, X } from "lucide-react";
 import EventCard from "./components/EventCard";
+import StepBreadcrumbs from "./components/StepBreadcrumbs";
 
 interface NormalizedEvent {
   id: string;
@@ -24,8 +25,11 @@ interface NormalizedEvent {
   usage?: any;
   costUsd?: number | null;
   receivedAt?: string;
+  _stepIndex?: number;
   raw: any;
 }
+
+interface StepDef { name: string; description?: string; }
 
 type FamilyFilter = string;
 
@@ -60,6 +64,14 @@ export default function App() {
   const [showFilters, setShowFilters] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
+  // Step protocol state
+  const [stepMode, setStepMode] = useState(false);
+  const [steps, setSteps] = useState<StepDef[]>([]);
+  const [currentStep, setCurrentStep] = useState(-1);
+  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [erroredSteps, setErroredSteps] = useState<Map<number, string>>(new Map());
+  const [viewedStep, setViewedStep] = useState<number | null>(null);
+
   // Fetch initial state
   useEffect(() => {
     fetch("/api/state")
@@ -67,6 +79,12 @@ export default function App() {
       .then((s) => {
         setSource(s.source);
         setFinished(s.finished);
+        if (s.stepMode) {
+          setStepMode(true);
+          setSteps(s.steps ?? []);
+          setCurrentStep(s.currentStep ?? -1);
+          setCompletedSteps(s.completedSteps ?? []);
+        }
       })
       .catch(() => {});
   }, []);
@@ -84,6 +102,31 @@ export default function App() {
       setFinished(true);
     });
 
+    // Step protocol events
+    es.addEventListener("step:init", (msg) => {
+      const data = JSON.parse((msg as MessageEvent).data);
+      setStepMode(true);
+      setSteps(data.steps);
+    });
+
+    es.addEventListener("step:start", (msg) => {
+      const data = JSON.parse((msg as MessageEvent).data);
+      setCurrentStep(data.stepIndex);
+      setViewedStep(data.stepIndex);
+    });
+
+    es.addEventListener("step:complete", (msg) => {
+      const data = JSON.parse((msg as MessageEvent).data);
+      setCompletedSteps((prev) =>
+        prev.includes(data.stepIndex) ? prev : [...prev, data.stepIndex]
+      );
+    });
+
+    es.addEventListener("step:error", (msg) => {
+      const data = JSON.parse((msg as MessageEvent).data);
+      setErroredSteps((prev) => new Map(prev).set(data.stepIndex, data.error ?? "Error"));
+    });
+
     es.onerror = () => {};
 
     return () => es.close();
@@ -96,7 +139,6 @@ export default function App() {
     }
   }, [events, autoScroll]);
 
-  // Detect scroll position
   const handleScroll = useCallback(() => {
     if (!listRef.current) return;
     const { scrollTop } = listRef.current;
@@ -126,14 +168,34 @@ export default function App() {
   const firstReceivedAt = events.length > 0 ? events[0].receivedAt : null;
 
   const filteredEvents = useMemo(() => {
-    if (activeFilters.size === 0) return events;
-    return events.filter((e) => activeFilters.has(e.family));
-  }, [events, activeFilters]);
+    let filtered = events;
+    if (stepMode && viewedStep !== null) {
+      filtered = filtered.filter((e) => e._stepIndex === viewedStep);
+    }
+    if (activeFilters.size > 0) {
+      filtered = filtered.filter((e) => activeFilters.has(e.family));
+    }
+    return filtered;
+  }, [events, stepMode, viewedStep, activeFilters]);
 
   const familyCounts = useMemo(() => {
+    const base = stepMode && viewedStep !== null
+      ? events.filter((e) => e._stepIndex === viewedStep)
+      : events;
     const counts: Record<string, number> = {};
-    for (const e of events) {
+    for (const e of base) {
       counts[e.family] = (counts[e.family] || 0) + 1;
+    }
+    return counts;
+  }, [events, stepMode, viewedStep]);
+
+  const eventCountsByStep = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const e of events) {
+      const si = e._stepIndex;
+      if (si !== undefined) {
+        counts[si] = (counts[si] || 0) + 1;
+      }
     }
     return counts;
   }, [events]);
@@ -181,6 +243,13 @@ export default function App() {
           <span className="text-zinc-500 text-sm">{events.length} events</span>
           {totalDurationMs > 0 && (
             <span className="text-zinc-500 text-sm">{formatElapsed(totalDurationMs)}</span>
+          )}
+
+          {/* Step progress in header */}
+          {stepMode && currentStep >= 0 && steps[currentStep] && (
+            <span className="text-zinc-400 text-sm">
+              Step {currentStep + 1}/{steps.length}: <span className="text-zinc-200">{steps[currentStep].name}</span>
+            </span>
           )}
 
           {/* Filter toggle */}
@@ -238,6 +307,20 @@ export default function App() {
         )}
       </header>
 
+      {/* Step breadcrumbs */}
+      {stepMode && steps.length > 0 && (
+        <StepBreadcrumbs
+          steps={steps}
+          currentStep={currentStep}
+          completedSteps={completedSteps}
+          erroredSteps={erroredSteps}
+          viewedStep={viewedStep}
+          eventCounts={eventCountsByStep}
+          onStepClick={(idx) => setViewedStep(idx)}
+          onShowAll={() => setViewedStep(null)}
+        />
+      )}
+
       {/* Event list */}
       <div
         ref={listRef}
@@ -249,15 +332,18 @@ export default function App() {
             Waiting for events...
           </div>
         )}
-        {[...filteredEvents].reverse().map((event, idx) => (
+        {[...filteredEvents].reverse().map((event) => (
           <EventCard
             key={event.id}
             event={event}
             index={events.indexOf(event)}
             firstReceivedAt={firstReceivedAt ?? undefined}
+            stepName={stepMode && viewedStep === null && event._stepIndex !== undefined
+              ? steps[event._stepIndex]?.name
+              : undefined}
           />
         ))}
-        {activeFilters.size > 0 && filteredEvents.length === 0 && events.length > 0 && (
+        {filteredEvents.length === 0 && events.length > 0 && (
           <div className="flex items-center justify-center h-32 text-zinc-600 text-sm">
             No events match the current filter.
           </div>
@@ -279,13 +365,18 @@ export default function App() {
         {finished ? (
           <span className="flex items-center gap-1.5 text-emerald-400">
             <CheckCircle className="w-4 h-4" />
-            Finished
+            {stepMode
+              ? `${completedSteps.length}/${steps.length} steps completed`
+              : "Finished"}
           </span>
         ) : (
-          <span className="text-zinc-500">Receiving events...</span>
+          <span className="text-zinc-500">
+            {stepMode && currentStep >= 0
+              ? `Running step ${currentStep + 1} of ${steps.length}...`
+              : "Receiving events..."}
+          </span>
         )}
 
-        {/* Usage stats */}
         <div className="ml-auto flex items-center gap-4 text-xs text-zinc-500">
           {totalTokens.total > 0 && (
             <span>
