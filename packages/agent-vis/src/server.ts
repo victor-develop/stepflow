@@ -53,7 +53,8 @@ export function createVisServer(
   rl.on("line", (line) => {
     const record = tryParseJson(line);
     if (!record) return;
-    const normalized = normalizeCliRecord(source, record);
+    const raw = normalizeCliRecord(source, record);
+    const normalized = Array.isArray(raw) ? raw : [raw];
     const now = new Date().toISOString();
     if (!startedAt) startedAt = now;
     for (const event of normalized) {
