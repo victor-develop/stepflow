@@ -254,9 +254,16 @@ progress to both surfaces simultaneously.
 | `--slack-app-token` | `SLACK_APP_TOKEN` | App token (`xapp-…`). Optional. |
 | `--slack-channel` | `SLACK_CHANNEL` | Channel ID. **Required.** |
 | `--slack-thread-ts` | `SLACK_THREAD_TS` | Reply inside an existing thread |
-| `--slack-plan-title` | `SLACK_PLAN_TITLE` | Title for the task list (default `Agent Run`) |
+| `--slack-plan-title` | `SLACK_PLAN_TITLE` | Title for the task list / parent message (default `Agent Run`) |
 | `--slack-task-mode` | `SLACK_TASK_DISPLAY_MODE` | `timeline` (default) or `plan` |
+| `--slack-team-id` | `SLACK_TEAM_ID` | Recipient team ID (auto-resolved via `auth.test`) |
+| `--slack-user-id` | `SLACK_USER_ID` | Recipient user ID (defaults to bot's own user ID) |
 | `--no-web` | — | Don't start the web visualizer (useful for headless/CI) |
+
+`chat.startStream` requires a `thread_ts`. If `--slack-thread-ts` is omitted,
+agent-vis posts a small parent message (titled with `--slack-plan-title`) via
+`chat.postMessage` and streams the run inside its thread. Set
+`AGENT_VIS_SLACK_DEBUG=1` to print every Slack request and response.
 
 ### Event mapping
 

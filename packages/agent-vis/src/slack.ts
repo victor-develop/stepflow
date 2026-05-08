@@ -34,6 +34,16 @@ export interface SlackOptions {
   channel: string;
   /** Optional thread timestamp to reply inside an existing thread. */
   threadTs?: string;
+  /**
+   * Recipient team ID (T...). Required by chat.startStream when posting to
+   * a channel. Auto-resolved via auth.test if omitted.
+   */
+  recipientTeamId?: string;
+  /**
+   * Recipient user ID (U...). Required by chat.startStream when posting to
+   * a channel. Defaults to the bot's own user ID via auth.test.
+   */
+  recipientUserId?: string;
   /** Optional bot display username override. */
   username?: string;
   /** Optional emoji icon (e.g., ":robot_face:"). */
@@ -103,7 +113,12 @@ export function createSlackSink(opts: SlackOptions): VisSink {
     return queue;
   }
 
+  const debug = process.env.AGENT_VIS_SLACK_DEBUG === "1";
+
   async function slackCall(method: string, body: any): Promise<any> {
+    if (debug) {
+      console.error(`[slack-sink] → ${method}: ${JSON.stringify(body)}`);
+    }
     const res = await fetchImpl(`${apiBase}/${method}`, {
       method: "POST",
       headers: {
@@ -113,18 +128,52 @@ export function createSlackSink(opts: SlackOptions): VisSink {
       body: JSON.stringify(body),
     });
     const json: any = await res.json();
+    if (debug) {
+      console.error(`[slack-sink] ← ${method}: ${JSON.stringify(json)}`);
+    }
     if (!json.ok) {
-      throw new Error(`${method}: ${json.error ?? "unknown_error"}`);
+      const meta = json.response_metadata?.messages
+        ? ` [${json.response_metadata.messages.join("; ")}]`
+        : "";
+      const errs = json.errors ? ` errors=${JSON.stringify(json.errors)}` : "";
+      throw new Error(`${method}: ${json.error ?? "unknown_error"}${meta}${errs}`);
     }
     return json;
+  }
+
+  let recipientTeamId = opts.recipientTeamId;
+  let recipientUserId = opts.recipientUserId;
+
+  async function resolveRecipients(): Promise<void> {
+    if (recipientTeamId && recipientUserId) return;
+    const auth = await slackCall("auth.test", {});
+    recipientTeamId = recipientTeamId ?? auth.team_id;
+    recipientUserId = recipientUserId ?? auth.user_id;
+  }
+
+  async function ensureThreadTs(): Promise<string> {
+    if (opts.threadTs) return opts.threadTs;
+    // chat.startStream requires thread_ts. When the caller hasn't supplied one,
+    // post a lightweight parent message and reply in its thread.
+    const parent = await slackCall("chat.postMessage", {
+      channel: opts.channel,
+      text: opts.planTitle ?? "Agent Run",
+    });
+    return parent.ts;
   }
 
   async function ensureStarted(initialChunks?: Chunk[]): Promise<void> {
     if (ts) return;
     if (!starting) {
       starting = (async () => {
-        const body: Record<string, any> = { channel: opts.channel };
-        if (opts.threadTs) body.thread_ts = opts.threadTs;
+        await resolveRecipients();
+        const threadTs = await ensureThreadTs();
+        const body: Record<string, any> = {
+          channel: opts.channel,
+          thread_ts: threadTs,
+        };
+        if (recipientTeamId) body.recipient_team_id = recipientTeamId;
+        if (recipientUserId) body.recipient_user_id = recipientUserId;
         if (opts.username) body.username = opts.username;
         if (opts.iconEmoji) body.icon_emoji = opts.iconEmoji;
         if (opts.taskDisplayMode) body.task_display_mode = opts.taskDisplayMode;

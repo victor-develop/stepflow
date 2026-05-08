@@ -18,6 +18,8 @@ let slackChannel = process.env.SLACK_CHANNEL ?? process.env.SLACK_CHANNEL_ID;
 let slackThreadTs = process.env.SLACK_THREAD_TS;
 let slackPlanTitle = process.env.SLACK_PLAN_TITLE;
 let slackTaskMode = process.env.SLACK_TASK_DISPLAY_MODE;
+let slackTeamId = process.env.SLACK_TEAM_ID;
+let slackUserId = process.env.SLACK_USER_ID;
 let noWeb = false;
 
 function nextArg(i) {
@@ -54,6 +56,12 @@ for (let i = 0; i < args.length; i++) {
     i++;
   } else if (a === "--slack-task-mode") {
     slackTaskMode = nextArg(i);
+    i++;
+  } else if (a === "--slack-team-id") {
+    slackTeamId = nextArg(i);
+    i++;
+  } else if (a === "--slack-user-id") {
+    slackUserId = nextArg(i);
     i++;
   } else if (a === "--no-web") {
     noWeb = true;
@@ -116,6 +124,8 @@ if (slackEnabled) {
     threadTs: slackThreadTs,
     planTitle: slackPlanTitle,
     taskDisplayMode: slackTaskMode,
+    recipientTeamId: slackTeamId,
+    recipientUserId: slackUserId,
   }));
   const where = slackThreadTs ? `${slackChannel} (thread ${slackThreadTs})` : slackChannel;
   console.error(`agent-vis: streaming progress to Slack ${where}`);
