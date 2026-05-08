@@ -205,6 +205,75 @@ Returns current state snapshot:
 }
 ```
 
+## Slack Mode
+
+Stream agent progress into a Slack channel or thread using the Slack
+[Thinking Steps for AI agents](https://slack.dev/slack-thinking-steps-ai-agents/)
+streaming API (`chat.startStream` / `chat.appendStream` / `chat.stopStream`).
+
+### Setup
+
+1. Create a Slack app and add the **`chat:write`** bot scope.
+2. Install the app to your workspace and copy the **Bot User OAuth Token** (`xoxb-…`).
+3. (Optional) Generate an **App-Level Token** (`xapp-…`) — currently accepted
+   for forward compatibility (Socket Mode); not required for streaming.
+4. Invite the bot to the target channel and copy the **Channel ID**
+   (e.g., `C0123456789`).
+
+### Usage
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-...
+export SLACK_CHANNEL=C0123456789
+
+claude -p "your prompt" --output-format stream-json --verbose \
+  | npx @starsea/agent-vis --slack --no-web claude
+```
+
+Equivalent with explicit flags:
+
+```bash
+... | npx @starsea/agent-vis \
+    --slack \
+    --slack-bot-token xoxb-... \
+    --slack-app-token xapp-... \
+    --slack-channel C0123456789 \
+    --slack-thread-ts 1721609600.123456 \
+    --no-web claude
+```
+
+`--slack` can be combined with the web visualizer (omit `--no-web`) to mirror
+progress to both surfaces simultaneously.
+
+### Flags / Env Vars
+
+| Flag | Env | Description |
+|------|-----|-------------|
+| `--slack` | — | Enable Slack streaming sink |
+| `--slack-bot-token` | `SLACK_BOT_TOKEN` | Bot token (`xoxb-…`). **Required.** |
+| `--slack-app-token` | `SLACK_APP_TOKEN` | App token (`xapp-…`). Optional. |
+| `--slack-channel` | `SLACK_CHANNEL` | Channel ID. **Required.** |
+| `--slack-thread-ts` | `SLACK_THREAD_TS` | Reply inside an existing thread |
+| `--slack-plan-title` | `SLACK_PLAN_TITLE` | Title for the task list (default `Agent Run`) |
+| `--slack-task-mode` | `SLACK_TASK_DISPLAY_MODE` | `timeline` (default) or `plan` |
+| `--no-web` | — | Don't start the web visualizer (useful for headless/CI) |
+
+### Event mapping
+
+| Source event | Slack chunk |
+|--------------|-------------|
+| `step:init` | `chat.startStream` with `plan_update` + N `task_update` (status `pending`) |
+| `step:start` | `chat.appendStream` `task_update` (status `in_progress`) |
+| `step:complete` | `chat.appendStream` `task_update` (status `complete`) |
+| `step:error` | `chat.appendStream` `task_update` (status `error`, `details`) |
+| Assistant text | Debounced `markdown_text` chunk |
+| Tool call started | `task_update` (status `in_progress`) |
+| Tool call completed | `task_update` (status `complete` or `error`) |
+| stdin closed | `chat.stopStream` |
+
+If no Step Protocol events appear, the run is reported as a single streaming
+message containing assistant text and per-tool task cards.
+
 ## License
 
 MIT

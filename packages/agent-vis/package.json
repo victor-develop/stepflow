@@ -6,7 +6,7 @@
   "bin": { "agent-vis": "bin/agent-vis.mjs" },
   "main": "./dist/server.js",
   "scripts": {
-    "build:server": "tsup src/server.ts --format esm --out-dir dist --dts",
+    "build:server": "tsup src/server.ts src/slack.ts --format esm --out-dir dist --dts",
     "build:web": "vite build",
     "build": "npm run build:server && npm run build:web",
     "test": "vitest run",
