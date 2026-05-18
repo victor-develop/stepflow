@@ -12,7 +12,7 @@ import {
 
 interface SseClient { id: number; res: Response; }
 
-interface StepDef { name: string; description?: string; }
+export interface StepDef { name: string; description?: string; }
 
 interface StepState {
   steps: StepDef[];
@@ -21,11 +21,21 @@ interface StepState {
   erroredSteps: Map<number, string>;
 }
 
+export interface VisSink {
+  onEvent?(event: NormalizedEvent): void;
+  onStepInit?(steps: StepDef[]): void;
+  onStepStart?(stepIndex: number): void;
+  onStepComplete?(stepIndex: number): void;
+  onStepError?(stepIndex: number, error?: string): void;
+  onFinish?(): void | Promise<void>;
+}
+
 export function createVisServer(
   port: number,
   source: CliSource,
   pkgRoot?: string,
-  input?: NodeJS.ReadableStream
+  input?: NodeJS.ReadableStream,
+  sinks: VisSink[] = []
 ): { app: express.Express; server: Server } {
   if (!pkgRoot) {
     const __filename = fileURLToPath(import.meta.url);
@@ -64,6 +74,19 @@ export function createVisServer(
     broadcastNamedEvent("finish", {});
   }
 
+  function notifySinks<K extends keyof VisSink>(method: K, ...args: any[]) {
+    for (const sink of sinks) {
+      const fn = sink[method] as any;
+      if (typeof fn === "function") {
+        try {
+          fn.apply(sink, args);
+        } catch (err) {
+          console.error(`[vis-sink] ${String(method)} threw:`, err);
+        }
+      }
+    }
+  }
+
   // Step protocol handler
   function handleStepProtocol(record: any) {
     switch (record.type) {
@@ -75,12 +98,14 @@ export function createVisServer(
           erroredSteps: new Map(),
         };
         broadcastNamedEvent("step:init", { steps: stepState.steps });
+        notifySinks("onStepInit", stepState.steps);
         break;
       }
       case "step:start": {
         if (!stepState) return;
         stepState.currentStep = record.stepIndex ?? 0;
         broadcastNamedEvent("step:start", { stepIndex: stepState.currentStep });
+        notifySinks("onStepStart", stepState.currentStep);
         break;
       }
       case "step:complete": {
@@ -90,6 +115,7 @@ export function createVisServer(
           stepState.completedSteps.push(idx);
         }
         broadcastNamedEvent("step:complete", { stepIndex: idx });
+        notifySinks("onStepComplete", idx);
         break;
       }
       case "step:error": {
@@ -97,6 +123,7 @@ export function createVisServer(
         const idx = record.stepIndex ?? stepState.currentStep;
         stepState.erroredSteps.set(idx, record.error ?? "Unknown error");
         broadcastNamedEvent("step:error", { stepIndex: idx, error: record.error });
+        notifySinks("onStepError", idx, record.error);
         break;
       }
     }
@@ -126,11 +153,13 @@ export function createVisServer(
       }
       events.push(event);
       broadcast(event);
+      notifySinks("onEvent", event);
     }
   });
   rl.on("close", () => {
     finished = true;
     broadcastFinish();
+    notifySinks("onFinish");
   });
 
   // API: SSE event stream
